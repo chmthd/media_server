@@ -1,7 +1,7 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
-  /* config options here */
+const nextConfig = {
+  env: {
+    MEDIA_PATH: process.env.MEDIA_PATH,
+  },
 };
 
-export default nextConfig;
+module.exports = nextConfig;
