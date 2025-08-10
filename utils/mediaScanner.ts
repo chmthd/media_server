@@ -1,31 +1,53 @@
-
-import fs from 'fs';
+import fs from 'fs';  
+import fsPromises from 'fs/promises';  
 import path from 'path';
 
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.avi', '.mov'];
 
-export function getMediaFiles(dir: string): { name: string; path: string }[] {
-  const files: { name: string; path: string }[] = [];
+export async function getMediaFiles(dir: string) {
+  let results: any[] = [];
 
-  if (!fs.existsSync(dir)) {
-    console.warn(`Directory not found: ${dir}`);
-    return files;
+  try {
+    const stats = await fsPromises.stat(dir);
+    if (!stats.isDirectory()) {
+      throw new Error(`Path is not a directory: ${dir}`);
+    }
+  } catch (err) {
+    throw new Error(`Directory not found or accessible: ${dir}`);
   }
 
-  const items = fs.readdirSync(dir);
-  for (const item of items) {
-    const fullPath = path.join(dir, item);
-    const stat = fs.statSync(fullPath);
+  async function scanFolder(folderPath: string) {
+    const items = await fsPromises.readdir(folderPath, { withFileTypes: true });
 
-    if (stat.isDirectory()) {
-      files.push(...getMediaFiles(fullPath));
-    } else if (VIDEO_EXTENSIONS.includes(path.extname(item).toLowerCase())) {
-      files.push({
-        name: path.basename(item),
-        path: fullPath,
-      });
+    for (const item of items) {
+      const fullPath = path.join(folderPath, item.name);
+
+      if (item.isDirectory()) {
+        await scanFolder(fullPath); 
+      } else {
+        const ext = path.extname(item.name).toLowerCase();
+        if (VIDEO_EXTENSIONS.includes(ext)) {
+          const fileName = item.name;
+          const relativePath = path.relative(dir, fullPath);
+
+          const showFolder = path.basename(path.dirname(fullPath)); 
+          const rootFolder = path.basename(path.dirname(path.dirname(fullPath))); 
+
+          const isTVShow = fs.existsSync(path.join(folderPath, rootFolder, "Season"));
+          const mediaType = isTVShow ? "TV Show" : "Movie";
+
+          results.push({
+            name: fileName,
+            path: relativePath,
+            show: showFolder,
+            type: mediaType, 
+            rootFolder,       
+          });
+        }
+      }
     }
   }
 
-  return files;
+  await scanFolder(dir);
+  return results;
 }

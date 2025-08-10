@@ -1,4 +1,3 @@
-// app/api/stream/route.ts
 import fs from 'fs';
 import { NextRequest } from 'next/server';
 import path from 'path';
@@ -12,16 +11,17 @@ export async function GET(req: NextRequest) {
   }
 
   const decodedPath = decodeURIComponent(fileParam);
+  const fullPath = path.join(mediaPath, decodedPath);
 
-  if (!decodedPath.startsWith(mediaPath)) {
+  if (!fullPath.startsWith(path.resolve(mediaPath))) {
     return new Response('Forbidden', { status: 403 });
   }
 
-  if (!fs.existsSync(decodedPath)) {
+  if (!fs.existsSync(fullPath)) {
     return new Response('File not found', { status: 404 });
   }
 
-  const stat = fs.statSync(decodedPath);
+  const stat = fs.statSync(fullPath);
   const fileSize = stat.size;
   const range = req.headers.get('range');
 
@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     const end = endStr ? parseInt(endStr, 10) : fileSize - 1;
     const chunkSize = end - start + 1;
 
-    const stream = fs.createReadStream(decodedPath, { start, end });
+    const stream = fs.createReadStream(fullPath, { start, end });
 
     return new Response(stream as any, {
       status: 206,
@@ -43,7 +43,7 @@ export async function GET(req: NextRequest) {
       },
     });
   } else {
-    const stream = fs.createReadStream(decodedPath);
+    const stream = fs.createReadStream(fullPath);
     return new Response(stream as any, {
       status: 200,
       headers: {
