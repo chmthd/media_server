@@ -12,6 +12,8 @@
 
 # testing
 /coverage
+/scripts
+scanner.learn.ts
 
 # next.js
 /.next/

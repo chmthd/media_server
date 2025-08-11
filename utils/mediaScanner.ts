@@ -1,23 +1,27 @@
-import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
+import { parseMediaName } from "@/utils/parseMediaName";
 
 const VIDEO_EXTENSIONS = [".mp4", ".mkv", ".avi", ".mov"];
 
-type Scanned = {
-  name: string;
-  path: string;        
-  show: string;       
+export type Scanned = {
+  name: string;           
+  path: string;           
+  show: string;           
   type: "Movie" | "TV Show";
-  rootFolder: string;  
-  season?: string;     
+  rootFolder: string;     
+  season?: string;
+  cleanTitle: string;     
+  year?: number;          // parsed year if available
 };
 
 export async function getMediaFiles(root: string): Promise<Scanned[]> {
   const results: Scanned[] = [];
 
   const stat = await fsp.stat(root).catch(() => null);
-  if (!stat || !stat.isDirectory()) throw new Error(`Directory not found or accessible: ${root}`);
+  if (!stat || !stat.isDirectory()) {
+    throw new Error(`Directory not found or accessible: ${root}`);
+  }
 
   async function walk(dir: string) {
     const items = await fsp.readdir(dir, { withFileTypes: true });
@@ -31,16 +35,15 @@ export async function getMediaFiles(root: string): Promise<Scanned[]> {
       const ext = path.extname(it.name).toLowerCase();
       if (!VIDEO_EXTENSIONS.includes(ext)) continue;
 
-      const rel = path.relative(root, full);                 
+      const rel = path.relative(root, full);
       const parts = rel.split(path.sep);
       const top = (parts[0] || "").toLowerCase();
 
-      const isTV = top.includes("tv") && top.includes("show"); 
+      const isTV = top.includes("tv") && top.includes("show");
       const baseNoExt = path.basename(it.name, ext);
 
       if (isTV) {
-
-        const showTitle = parts[1] || "Unknown Show";
+        const showFolder = parts[1] || "Unknown Show";
         const seasonFolder = parts[2] || "";
         const m =
           seasonFolder.match(/^(?:season\s*)?(\d{1,2})$/i) ||
@@ -48,24 +51,31 @@ export async function getMediaFiles(root: string): Promise<Scanned[]> {
           baseNoExt.match(/S(\d{1,2})/i);
         const s = m ? `S${m[1].padStart(2, "0")}` : "Unknown Season";
 
-        results.push({
-          name: it.name,
-          path: rel,
-          show: showTitle,
-          type: "TV Show",
-          rootFolder: showTitle,
-          season: s,
-        });
-      } else {
-        const second = parts[1];
-        const movieTitle = second ? second : baseNoExt;
+        const { title: cleanTitle, year } = parseMediaName(showFolder);
 
         results.push({
           name: it.name,
           path: rel,
-          show: movieTitle,
+          show: showFolder,
+          type: "TV Show",
+          rootFolder: showFolder,
+          season: s,
+          cleanTitle,
+          year, 
+        });
+      } else {
+        const second = parts[1];
+        const movieGroup = second ? second : baseNoExt;
+        const { title: cleanTitle, year } = parseMediaName(movieGroup);
+
+        results.push({
+          name: it.name,
+          path: rel,
+          show: movieGroup,
           type: "Movie",
-          rootFolder: movieTitle,
+          rootFolder: movieGroup,
+          cleanTitle,
+          year,
         });
       }
     }

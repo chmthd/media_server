@@ -6,14 +6,16 @@ type MediaFile = {
   name: string;
   path: string;
   poster?: string;
-  show: string;                  
+  show: string;
   type: "Movie" | "TV Show";
-  rootFolder: string;            
-  season?: string;               
+  rootFolder: string;
+  season?: string;
+  cleanTitle: string;
+  year?: number;
 };
 
 type GroupedMedia = {
-  key: string;                   
+  key: string;
   displayTitle: string;
   poster: string;
   kind: "Movie" | "TV Show";
@@ -77,7 +79,7 @@ export default function PS3StyleUI() {
       if (!Array.isArray(files)) { console.error("Unexpected format:", files); return; }
 
       const buckets = files.reduce((acc: Record<string, MediaFile[]>, f) => {
-        const key = f.type === "Movie" ? f.show : f.rootFolder;
+        const key = f.cleanTitle || f.show || f.rootFolder;
         (acc[key] ||= []).push(f);
         return acc;
       }, {});
@@ -86,11 +88,10 @@ export default function PS3StyleUI() {
         Object.entries(buckets).map(async ([key, list]) => {
           const first = list[0];
           const kind = first.type;
-          const title = kind === "Movie" ? first.show : first.rootFolder;
-          const clean = title.replace(/\.[^/.]+$/, "").replace(/[._-]/g, " ");
+          const title = first.cleanTitle || first.show || first.rootFolder;
 
           const posterRes = await fetch(
-            `/api/poster?type=${kind === "Movie" ? "movie" : "tv"}&query=${encodeURIComponent(clean)}`
+            `/api/poster?type=${kind === "Movie" ? "movie" : "tv"}&query=${encodeURIComponent(title)}${first.year ? `&year=${first.year}` : ""}`
           );
           const posterData = posterRes.ok ? await posterRes.json() : { poster: null };
           const groupPoster = posterData.poster || "/placeholder.jpg";
@@ -107,7 +108,7 @@ export default function PS3StyleUI() {
             seasons = await Promise.all(
               Object.keys(sMap).map(async (sName) => {
                 const sRes = await fetch(
-                  `/api/poster?type=tv&query=${encodeURIComponent(clean)}&season=${encodeURIComponent(sName)}`
+                  `/api/poster?type=tv&query=${encodeURIComponent(title)}&season=${encodeURIComponent(sName)}${first.year ? `&year=${first.year}` : ""}`
                 );
                 const sData = sRes.ok ? await sRes.json() : { poster: null };
                 return { seasonName: sName, poster: sData.poster || "/placeholder.jpg", files: sMap[sName] };
@@ -133,7 +134,7 @@ export default function PS3StyleUI() {
       <nav className="navbar glass">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-white/20 shadow-inner" />
-          <span className="font-semibold text-lg drop-shadow">Media Server</span>
+          <span className="font-semibold text-lg drop-shadow">Local Media Server</span>
         </div>
         <div className="flex items-center gap-2 ml-6">
           <button className={`chip ${activeTab === "TV" ? "chip-active" : ""}`}

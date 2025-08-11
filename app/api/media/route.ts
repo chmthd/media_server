@@ -10,24 +10,16 @@ export async function GET() {
   }
 
   try {
-    console.log("MEDIA_PATH:", mediaPath);
     const files = await getMediaFiles(mediaPath);
-    const safeFiles = Array.isArray(files) ? files : [];
-
-    console.log("FILES FOUND:", safeFiles);
-
-    return new Response(JSON.stringify(safeFiles), {
+    return new Response(JSON.stringify(files), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
   } catch (err: any) {
     console.error("Error scanning media:", err);
     return new Response(
-      JSON.stringify({ error: err.message || "Unknown error" }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
+      JSON.stringify({ error: err?.message || "Unknown error" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 }
