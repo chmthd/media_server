@@ -1,13 +1,13 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
-type MediaFile = { 
-  name: string; 
-  path: string; 
-  poster?: string; 
-  show: string; 
-  type: string; 
-  rootFolder: string; 
+type MediaFile = {
+  name: string;
+  path: string;
+  poster?: string;
+  show: string;
+  type: string;
+  rootFolder: string;
   season?: string;
 };
 
@@ -23,72 +23,86 @@ type GroupedMedia = {
 
 export default function PS3StyleUI() {
   const [media, setMedia] = useState<GroupedMedia[]>([]);
-  const [selected, setSelected] = useState<number>(0);
+  const [selectedShow, setSelectedShow] = useState<GroupedMedia | null>(null);
+  const [selectedEpisode, setSelectedEpisode] = useState<MediaFile | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [fsPending, setFsPending] = useState(false);
+
+  useEffect(() => {
+    if (selectedEpisode && fsPending && videoRef.current) {
+      const el = videoRef.current;
+      const req =
+        el.requestFullscreen ||
+        // @ts-ignore
+        el.webkitRequestFullscreen ||
+        // @ts-ignore
+        el.mozRequestFullScreen ||
+        // @ts-ignore
+        el.msRequestFullscreen;
+      if (req) {
+        try { req.call(el); } catch {}
+      }
+      setFsPending(false);
+    }
+  }, [selectedEpisode, fsPending]);
 
   useEffect(() => {
     async function loadMedia() {
       try {
         const res = await fetch("/api/media");
-
         if (!res.ok) {
           console.error("API error:", res.status);
           return;
         }
-
         const data = await res.json();
-
         if (!Array.isArray(data)) {
-          console.error("Unexpected data format:", data);
+          console.error("Unexpected format:", data);
           return;
         }
 
-        console.log("DATA FROM API:", data);
-        const groupedMedia = data.reduce((acc: any, file: MediaFile) => {
-          const key = file.rootFolder; 
-          if (!acc[key]) {
-            acc[key] = [];
-          }
+        const grouped = data.reduce((acc: Record<string, MediaFile[]>, file: MediaFile) => {
+          const key = file.rootFolder;
+          if (!acc[key]) acc[key] = [];
           acc[key].push(file);
           return acc;
         }, {});
 
         const withPosters = await Promise.all(
-          Object.keys(groupedMedia).map(async (group) => {
-            const groupFiles = groupedMedia[group];
-            const firstItem = groupFiles[0]; 
-            const cleanName = `${firstItem.rootFolder}`
-              .replace(/\.[^/.]+$/, "") // remove extension
-              .replace(/[._-]/g, " ");  // replace separators with spaces
+          Object.keys(grouped).map(async (group) => {
+            const groupFiles = grouped[group];
+            const firstItem = groupFiles[0];
+            const cleanName = firstItem.rootFolder
+              .replace(/\.[^/.]+$/, "")
+              .replace(/[._-]/g, " ");
 
             try {
               const posterRes = await fetch(
                 `/api/poster?query=${encodeURIComponent(cleanName)}`
               );
+              const posterData = posterRes.ok ? await posterRes.json() : { poster: null };
 
-              if (!posterRes.ok) throw new Error("Poster fetch failed");
+              const seasonsMap = groupFiles.reduce(
+                (seasonAcc: Record<string, MediaFile[]>, file: MediaFile) => {
+                  const seasonName = file.season || "Unknown Season";
+                  if (!seasonAcc[seasonName]) seasonAcc[seasonName] = [];
+                  seasonAcc[seasonName].push(file);
+                  return seasonAcc;
+                },
+                {}
+              );
 
-              const posterData = await posterRes.json();
-
-              const seasons = groupFiles.reduce((seasonAcc: any, file: MediaFile) => {
-                const seasonName = file.season || "Unknown Season"; 
-                if (!seasonAcc[seasonName]) {
-                  seasonAcc[seasonName] = [];
-                }
-                seasonAcc[seasonName].push(file);
-                return seasonAcc;
-              }, {});
-
-              const groupedSeasons = await Promise.all(
-                Object.keys(seasons).map(async (seasonName) => {
-                  const seasonFiles = seasons[seasonName];
-                  const seasonPoster = await fetch(
+              const seasons = await Promise.all(
+                Object.keys(seasonsMap).map(async (seasonName) => {
+                  const seasonPosterRes = await fetch(
                     `/api/poster?query=${encodeURIComponent(seasonName)}`
-                  ).then(res => res.json()).then(data => data.poster || "/placeholder.jpg");
-
+                  );
+                  const seasonPosterData = seasonPosterRes.ok
+                    ? await seasonPosterRes.json()
+                    : { poster: null };
                   return {
                     seasonName,
-                    poster: seasonPoster,
-                    files: seasonFiles
+                    poster: seasonPosterData.poster || "/placeholder.jpg",
+                    files: seasonsMap[seasonName],
                   };
                 })
               );
@@ -96,11 +110,14 @@ export default function PS3StyleUI() {
               return {
                 rootFolder: firstItem.rootFolder,
                 poster: posterData.poster || "/placeholder.jpg",
-                seasons: groupedSeasons,
+                seasons,
               };
-            } catch (err) {
-              console.warn(`Poster fetch failed for ${firstItem.rootFolder}`, err);
-              return { rootFolder: firstItem.rootFolder, poster: "/placeholder.jpg", seasons: [] };
+            } catch {
+              return {
+                rootFolder: firstItem.rootFolder,
+                poster: "/placeholder.jpg",
+                seasons: [],
+              };
             }
           })
         );
@@ -115,74 +132,150 @@ export default function PS3StyleUI() {
   }, []);
 
   return (
-    <div style={{ background: "#111", color: "#fff", padding: "20px" }}>
-      <h1 style={{ marginBottom: "20px" }}>My Library</h1>
-
-      {/* Media List */}
-      <div
-        style={{
-          display: "flex",
-          gap: "20px",
-          overflowX: "auto",
-          scrollBehavior: "smooth",
-          paddingBottom: "10px",
-        }}
-      >
-        {media.map((item, index) => (
-          <div
-            key={item.rootFolder}
-            style={{
-              flex: "0 0 auto",
-              textAlign: "center",
-              transform: selected === index ? "scale(1.2)" : "scale(1)",
-              transition: "transform 0.2s",
-              cursor: "pointer",
-            }}
-            onClick={() => setSelected(index)}
-          >
-            <img
-              src={item.poster}
-              alt={item.rootFolder}
-              style={{
-                width: "150px",
-                height: "220px",
-                objectFit: "cover",
-                borderRadius: "8px",
-                border:
-                  selected === index
-                    ? "3px solid #fff"
-                    : "3px solid transparent",
-              }}
-            />
-            <p
-              style={{
-                marginTop: "8px",
-                maxWidth: "150px",
-                overflow: "hidden",
-                whiteSpace: "nowrap",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {item.rootFolder}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {/* Video Player */}
-      {media[selected] && (
-        <div style={{ marginTop: "30px" }}>
-          <h2>Now Playing: {media[selected].seasons[0].files[0].name}</h2>
-          <video
-            key={media[selected].seasons[0].files[0].path}
-            controls
-            style={{ width: "100%", maxHeight: "70vh" }}
-            src={`/api/stream?file=${encodeURIComponent(
-              media[selected].seasons[0].files[0].path
-            )}`}
+    <div className="fa-bg min-h-screen text-white">
+      {/* NAVBAR */}
+      <nav className="navbar glass">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-white/20 shadow-inner" />
+          <span className="font-semibold text-lg drop-shadow">Media Server</span>
+        </div>
+        <div className="flex-1" />
+        <div className="hidden sm:flex items-center gap-2">
+          <input
+            placeholder="Search"
+            className="search text-sm outline-none text-white placeholder-white/70 bg-transparent border border-white/20 rounded-full px-3 py-1"
           />
         </div>
-      )}
+      </nav>
+
+      {/* MAIN */}
+      <main className="pt-24 px-5 md:px-8 pb-10">
+        {/* SHOWS ROW */}
+        <section className="glass rounded-2xl p-4 md:p-6 shadow-2xl">
+          <h2 className="sr-only">Shows</h2>
+          <div className="flex gap-5 overflow-x-auto pb-2 scroll-smooth snap-x snap-mandatory">
+            {media.map((item) => (
+              <button
+                key={item.rootFolder}
+                className="poster-card flex-shrink-0 text-center cursor-pointer transition-transform snap-start"
+                onClick={() => {
+                  setSelectedShow(item);
+                  setSelectedEpisode(null);
+                }}
+                title={item.rootFolder}
+              >
+                <img
+                  src={item.poster}
+                  alt={item.rootFolder}
+                  className="poster w-28 sm:w-36 md:w-44 h-40 sm:h-56 md:h-64 object-cover rounded-xl"
+                />
+                <p className="mt-2 truncate w-28 sm:w-36 md:w-44 text-sm">
+                  {item.rootFolder}
+                </p>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* DETAILS / EPISODES */}
+        {selectedShow && (
+          <section className="mt-8">
+            {/* Compact header instead of big poster */}
+            <div className="glass rounded-2xl p-4 md:p-6 shadow-2xl mb-6">
+              <div className="flex items-center gap-4">
+                <img
+                  src={selectedShow.poster}
+                  alt={selectedShow.rootFolder}
+                  className="w-14 h-20 object-cover rounded-lg"
+                />
+                <div className="flex-1">
+                  <h3 className="text-2xl font-semibold drop-shadow">
+                    {selectedShow.rootFolder}
+                  </h3>
+                  <p className="text-white/70 text-sm">Select an episode to play</p>
+                </div>
+                <button
+                  className="chip"
+                  onClick={() => {
+                    setSelectedShow(null);
+                    setSelectedEpisode(null);
+                  }}
+                >
+                  ← Back to Library
+                </button>
+              </div>
+            </div>
+
+            {/* Episodes only */}
+            <div className="glass rounded-2xl p-4 md:p-6 shadow-2xl">
+              {selectedShow.seasons.map((season) => (
+                <div key={season.seasonName} className="mb-6">
+                  <div className="flex items-center gap-3 mb-3">
+                    <img
+                      src={season.poster}
+                      alt={season.seasonName}
+                      className="w-12 h-12 object-cover rounded-md"
+                    />
+                    <h4 className="text-lg font-medium drop-shadow">{season.seasonName}</h4>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 xl:grid-cols-8 gap-3">
+                    {season.files.map((episode) => {
+                      const active = selectedEpisode?.path === episode.path;
+                      return (
+                        <button
+                          key={episode.path}
+                          className={`chip text-xs sm:text-sm ${active ? "chip-active" : ""}`}
+                          onClick={() => {
+                            setSelectedEpisode(episode);
+                            setFsPending(true);
+                          }}
+                          title={episode.name}
+                        >
+                          {episode.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* PLAYER */}
+        {selectedEpisode && (
+          <section className="mt-8">
+            <div className="glass rounded-2xl p-3 md:p-4 shadow-2xl">
+              <div className="flex items-center justify-between mb-2 px-1">
+                <h5 className="font-semibold drop-shadow">
+                  Now Playing:{" "}
+                  <span className="opacity-90">{selectedEpisode.name}</span>
+                </h5>
+                <div className="flex gap-2">
+                  <button
+                    className="chip"
+                    onClick={() => setSelectedEpisode(null)}
+                    title="Close player"
+                  >
+                    ✕ Close
+                  </button>
+                </div>
+              </div>
+
+              <video
+                ref={videoRef}
+                key={selectedEpisode.path}
+                controls
+                className="w-full max-h-[78vh] rounded-xl"
+                src={`/api/stream?file=${encodeURIComponent(
+                  selectedEpisode.path
+                )}`}
+              />
+            </div>
+          </section>
+        )}
+      </main>
     </div>
   );
 }
