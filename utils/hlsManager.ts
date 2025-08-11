@@ -4,12 +4,7 @@ import fsp from "fs/promises";
 import path from "path";
 import { spawn, ChildProcess } from "child_process";
 
-type Session = {
-  dir: string;
-  proc: ChildProcess | null;   
-  lastAccess: number;
-};
-
+type Session = { dir: string; proc: ChildProcess | null; lastAccess: number };
 const SESSIONS = new Map<string, Session>();
 
 function hashKey(fullPath: string) {
@@ -18,9 +13,7 @@ function hashKey(fullPath: string) {
 
 export function fullPathFromRelative(rel: string, mediaRoot: string) {
   const resolved = path.resolve(mediaRoot, rel);
-  if (!resolved.startsWith(path.resolve(mediaRoot))) {
-    throw new Error("Forbidden path");
-  }
+  if (!resolved.startsWith(path.resolve(mediaRoot))) throw new Error("Forbidden path");
   return resolved;
 }
 
@@ -33,14 +26,10 @@ export async function ensureTranscoding(fullPath: string) {
     await fsp.mkdir(dir, { recursive: true });
 
     const args = [
-      "-hide_banner",
-      "-loglevel", "error",
+      "-hide_banner", "-loglevel", "error",
       "-i", fullPath,
-      "-c:v", "libx264",
-      "-preset", "veryfast",
-      "-crf", "21",
-      "-c:a", "aac",
-      "-b:a", "128k",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "21",
+      "-c:a", "aac", "-b:a", "128k",
       "-movflags", "faststart",
       "-f", "hls",
       "-hls_time", "4",
@@ -49,12 +38,9 @@ export async function ensureTranscoding(fullPath: string) {
       path.join(dir, "index.m3u8"),
     ];
 
-    const proc = spawn("ffmpeg", args, { stdio: "ignore" }); // streams may be null
+    const proc = spawn("ffmpeg", args, { stdio: "ignore" });
     sess = { dir, proc, lastAccess: Date.now() };
     SESSIONS.set(key, sess);
-
-    proc.on("exit", () => {
-    });
   } else {
     sess.lastAccess = Date.now();
   }

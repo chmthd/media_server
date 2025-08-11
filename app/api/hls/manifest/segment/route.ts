@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
 import fs from "fs";
 import path from "path";
-import { ensureTranscoding, fullPathFromRelative } from "@/utils/hlsManager";
+import { ensureTranscoding, fullPathFromRelative, waitForFile } from "@/utils/hlsManager";
+
+export const runtime = "nodejs";
 
 export async function GET(req: NextRequest) {
   const mediaRoot = process.env.MEDIA_PATH;
@@ -18,21 +20,17 @@ export async function GET(req: NextRequest) {
     return new Response("Forbidden", { status: 403 });
   }
 
-  try {
-    const { dir } = await ensureTranscoding(full);
-    const segPath = path.join(dir, seg);
+  const { dir } = await ensureTranscoding(full);
+  const segPath = path.join(dir, seg);
 
-    if (!fs.existsSync(segPath)) return new Response("Segment not found", { status: 404 });
+  const ok = await waitForFile(segPath, 6000);
+  if (!ok) return new Response("Segment not ready", { status: 404 });
 
-    const stream = fs.createReadStream(segPath);
-    return new Response(stream as any, {
-      status: 200,
-      headers: {
-        "Content-Type": "video/mp2t",
-        "Cache-Control": "no-cache",
-      },
-    });
-  } catch (e: any) {
-    return new Response(e?.message || "Segment error", { status: 500 });
-  }
+  const stream = fs.createReadStream(segPath);
+  return new Response(stream as any, {
+    headers: {
+      "Content-Type": "video/mp2t",
+      "Cache-Control": "no-cache",
+    },
+  });
 }
