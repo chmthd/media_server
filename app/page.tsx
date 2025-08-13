@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import Hls from "hls.js";
 
 /* ----------------------------- Types ----------------------------- */
@@ -54,6 +54,16 @@ const fmtTime = (t: number) => {
     ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
     : `${m}:${String(sec).padStart(2, "0")}`;
 };
+
+// very small normalizer for matching (handles plural/singular crudely)
+const norm = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/['".,!?()\-_:]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const singularize = (s: string) => s.replace(/s\b/g, "");
 
 /* ---------------------------- Poster Row ---------------------------- */
 
@@ -136,6 +146,12 @@ export default function PS3StyleUI() {
   const [current, setCurrent] = useState(0);
   const [sliderVal, setSliderVal] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // search state
+  const [q, setQ] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(0);
+  const searchWrapRef = useRef<HTMLDivElement | null>(null);
 
   /* ---------- manifest only probe ---------- */
   const probeHls = useCallback(
@@ -281,28 +297,57 @@ export default function PS3StyleUI() {
     else doc.exitFullscreen?.();
   }, []);
 
-  // keyboard
+  // keyboard (global)
   useEffect(() => {
-    if (!nowPlaying) return;
+    if (!nowPlaying && !searchOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      const v = videoRef.current;
-      if (!v) return;
-      if (e.key === " ") {
-        e.preventDefault();
-        v.paused ? v.play() : v.pause();
-      } else if (e.key.toLowerCase() === "f") {
-        toggleFullscreen();
-      } else if (e.key === "ArrowLeft") {
-        v.currentTime = Math.max(0, v.currentTime - 10);
-      } else if (e.key === "ArrowRight") {
-        v.currentTime = Math.min(v.duration || v.currentTime + 10, v.currentTime + 10);
-      } else if (e.key === "Escape") {
-        setNowPlaying(null);
+      // player controls
+      if (nowPlaying) {
+        const v = videoRef.current;
+        if (e.key === " ") {
+          e.preventDefault();
+          if (v) v.paused ? v.play() : v.pause();
+          return;
+        }
+        if (e.key.toLowerCase() === "f") {
+          toggleFullscreen();
+          return;
+        }
+        if (v && e.key === "ArrowLeft") {
+          v.currentTime = Math.max(0, v.currentTime - 10);
+          return;
+        }
+        if (v && e.key === "ArrowRight") {
+          v.currentTime = Math.min(v.duration || v.currentTime + 10, v.currentTime + 10);
+          return;
+        }
+        if (e.key === "Escape") {
+          setNowPlaying(null);
+          return;
+        }
+      }
+
+      // search nav
+      if (searchOpen) {
+        if (e.key === "Escape") {
+          setSearchOpen(false);
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setActiveIdx((i) => i + 1);
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setActiveIdx((i) => Math.max(0, i - 1));
+          return;
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [nowPlaying, toggleFullscreen]);
+  }, [nowPlaying, searchOpen, toggleFullscreen]);
 
   /* -------------------------- data build -------------------------- */
   const buildGroups = useCallback(async (files: MediaFile[]): Promise<GroupedMedia[]> => {
@@ -373,6 +418,7 @@ export default function PS3StyleUI() {
           if (!cancelled) setMedia(parsed);
           return;
         } catch {
+          /* ignore cache parse error */
         }
       }
 
@@ -395,16 +441,101 @@ export default function PS3StyleUI() {
     };
   }, [buildGroups]);
 
-  /* ----------------------- filter rows for tab ---------------------- */
-  const visibleGroups = media.filter((g) =>
-    activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show"
+  /* -------------------------- SEARCH INDEX -------------------------- */
+
+  // tiny in‑memory index: one entry per group (movie or show)
+  type SearchItem = {
+    key: string;
+    title: string;
+    titleNorm: string;
+    titleNormSingular: string;
+    kind: "Movie" | "TV Show";
+    poster: string;
+    year?: number;
+    group: GroupedMedia;
+  };
+
+  const searchIndex: SearchItem[] = useMemo(() => {
+    return media.map((g) => {
+      const year = g.seasons?.[0]?.files?.[0]?.year;
+      const title = g.displayTitle;
+      const n = norm(title);
+      return {
+        key: g.key,
+        title,
+        titleNorm: n,
+        titleNormSingular: singularize(n),
+        kind: g.kind,
+        poster: g.poster || POSTER_FALLBACK,
+        year,
+        group: g,
+      };
+    });
+  }, [media]);
+
+  // debounced query
+  const [qLive, setQLive] = useState("");
+  useEffect(() => {
+    const id = setTimeout(() => setQLive(q), 120);
+    return () => clearTimeout(id);
+  }, [q]);
+
+  const results = useMemo(() => {
+    const nq = norm(qLive);
+    if (!nq) return [];
+    const nqS = singularize(nq);
+    const scored = searchIndex
+      .map((it) => {
+        const t = it.titleNorm;
+        const tS = it.titleNormSingular;
+        let score = 0;
+        if (t === nq || tS === nqS) score = 100; // exact
+        else if (t.startsWith(nq) || tS.startsWith(nqS)) score = 80; // prefix
+        else if (t.includes(nq) || tS.includes(nqS)) score = 60; // substring
+        // light year boost if query ends with a year
+        const yearMatch = qLive.match(/(^|\D)(19|20)\d{2}(\D|$)/);
+        if (yearMatch && it.year && yearMatch[0].includes(String(it.year))) score += 5;
+        return { it, score };
+      })
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score || a.it.title.localeCompare(b.it.title))
+      .slice(0, 8)
+      .map((x) => x.it);
+    return scored;
+  }, [qLive, searchIndex]);
+
+  // keep active index in range
+  useEffect(() => {
+    if (!results.length) setActiveIdx(0);
+    else setActiveIdx((i) => Math.min(i, results.length - 1));
+  }, [results.length]);
+
+  // close search on outside click
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (!searchOpen) return;
+      const el = searchWrapRef.current;
+      if (el && !el.contains(e.target as Node)) setSearchOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [searchOpen]);
+
+  const openFromResult = useCallback(
+    (item: SearchItem) => {
+      setSearchOpen(false);
+      setQ("");
+      setQLive("");
+      if (item.kind === "Movie") {
+        const movie = item.group.seasons[0]?.files[0];
+        if (movie) setNowPlaying(movie);
+      } else {
+        setSelected(item.group);
+        setSelectedSeason(item.group.seasons[0]?.seasonName ?? null);
+      }
+    },
+    []
   );
-  const chunkSize = Math.ceil(Math.max(1, visibleGroups.length) / 3);
-  const rows = [
-    { title: "Popular", items: visibleGroups.slice(0, chunkSize) },
-    { title: "Recently Added", items: visibleGroups.slice(chunkSize, chunkSize * 2) },
-    { title: "Classics", items: visibleGroups.slice(chunkSize * 2) },
-  ];
 
   /* ---------------------- poster click behaviour ---------------------- */
   const handleSelect = useCallback((g: GroupedMedia) => {
@@ -426,6 +557,7 @@ export default function PS3StyleUI() {
           <div className="w-8 h-8 rounded-full bg-white/20 shadow-inner" />
           <span className="font-semibold text-lg drop-shadow">Local Media Server</span>
         </div>
+
         <div className="flex items-center gap-2 ml-6">
           <button
             className={`chip ${activeTab === "TV" ? "chip-active" : ""}`}
@@ -440,17 +572,60 @@ export default function PS3StyleUI() {
             Movies
           </button>
         </div>
+
         <div className="flex-1" />
-        <div className="hidden sm:flex items-center gap-2">
+
+        {/* SEARCH */}
+        <div ref={searchWrapRef} className="relative hidden sm:block">
           <input
             placeholder="Search"
-            className="search text-sm outline-none text-white placeholder-white/70 bg-transparent border border-white/20 rounded-full px-3 py-1"
+            className="search text-sm outline-none text-white placeholder-white/70 bg-transparent border border-white/20 rounded-full px-3 py-1 w-64"
+            value={q}
+            onFocus={() => setSearchOpen(true)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setSearchOpen(true);
+            }}
           />
+          {searchOpen && qLive && results.length > 0 && (
+            <div className="absolute right-0 mt-2 w-[22rem] max-h-[70vh] overflow-auto rounded-xl bg-[#0b1220]/95 border border-white/10 shadow-2xl backdrop-blur">
+              {results.map((r, i) => (
+                <button
+                  key={r.key}
+                  className={`w-full flex gap-3 items-center px-3 py-2 text-left hover:bg-white/5 ${
+                    i === activeIdx ? "bg-white/10" : ""
+                  }`}
+                  onMouseEnter={() => setActiveIdx(i)}
+                  onClick={() => openFromResult(r)}
+                >
+                  <img
+                    src={r.poster || POSTER_FALLBACK}
+                    onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
+                    className="w-[34px] h-[50px] object-cover rounded"
+                    alt=""
+                  />
+                  <div className="min-w-0">
+                    <div className="truncate">{r.title}</div>
+                    <div className="text-xs opacity-70">
+                      {r.kind} {r.year ? `• ${r.year}` : ""}
+                    </div>
+                  </div>
+                </button>
+              ))}
+              <div className="px-3 py-2 text-xs opacity-60 border-t border-white/10">
+                {results.length} result{results.length === 1 ? "" : "s"}
+              </div>
+            </div>
+          )}
         </div>
       </nav>
 
       <main className="pt-24 pb-10">
-        {rows.map((row) => (
+        {[
+          { title: "Popular", items: media.filter((g) => (activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show")).slice(0, Math.ceil(Math.max(1, media.length) / 3)) },
+          { title: "Recently Added", items: media.filter((g) => (activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show")).slice(Math.ceil(Math.max(1, media.length) / 3), Math.ceil(Math.max(1, media.length) / 3) * 2) },
+          { title: "Classics", items: media.filter((g) => (activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show")).slice(Math.ceil(Math.max(1, media.length) / 3) * 2) },
+        ].map((row) => (
           <PosterRow key={row.title} title={row.title} items={row.items} onSelectGroup={handleSelect} />
         ))}
       </main>
