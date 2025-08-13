@@ -55,7 +55,7 @@ const fmtTime = (t: number) => {
     : `${m}:${String(sec).padStart(2, "0")}`;
 };
 
-// very small normalizer for matching (handles plural/singular crudely)
+// tiny normalizer for matching (handles plural/singular crudely)
 const norm = (s: string) =>
   s
     .toLowerCase()
@@ -64,6 +64,46 @@ const norm = (s: string) =>
     .trim();
 
 const singularize = (s: string) => s.replace(/s\b/g, "");
+
+/* --------------------------- Icons (SVG) --------------------------- */
+
+const iconCls = "w-4 h-4 md:w-5 md:h-5";
+function SearchIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconCls} {...props}>
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z" />
+    </svg>
+  );
+}
+function ShuffleIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconCls} {...props}>
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M16 3h5v5M3 8h6l7 8h5M21 16v5h-5M3 16h6l2.5-2.9" />
+    </svg>
+  );
+}
+function MoonIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconCls} {...props}>
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+  );
+}
+function CogIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconCls} {...props}>
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M10.3 3.2 9.7 5.1a7.6 7.6 0 0 0-1.8 1l-1.9-.6-1.8 3.1 1.6 1.3a7.8 7.8 0 0 0 0 2.1L2.3 14l1.8 3.1 1.9-.6c.6.4 1.2.7 1.8 1l.6 1.9h3.6l.6-1.9c.6-.3 1.2-.6 1.8-1l1.9.6 1.8-3.1-1.6-1.3c.1-.7.1-1.4 0-2.1l1.6-1.3-1.8-3.1-1.9.6c-.6-.4-1.2-.7-1.8-1l-.6-1.9h-3.6z" />
+      <circle cx="12" cy="12" r="3" strokeWidth="2" />
+    </svg>
+  );
+}
+function XIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconCls} {...props}>
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6l-12 12" />
+    </svg>
+  );
+}
 
 /* ---------------------------- Poster Row ---------------------------- */
 
@@ -149,9 +189,9 @@ export default function PS3StyleUI() {
 
   // search state
   const [q, setQ] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false); 
   const [activeIdx, setActiveIdx] = useState(0);
-  const searchWrapRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   /* ---------- manifest only probe ---------- */
   const probeHls = useCallback(
@@ -244,7 +284,6 @@ export default function PS3StyleUI() {
       }
     }
 
-    // call with narrowed values
     start(file, el);
 
     return () => {
@@ -254,7 +293,7 @@ export default function PS3StyleUI() {
     };
   }, [nowPlaying, probeHls]);
 
-  // media event listeners (safe – we guard null)
+  // media event listeners
   useEffect(() => {
     const el = videoRef.current;
     if (!el) return;
@@ -297,28 +336,63 @@ export default function PS3StyleUI() {
     else doc.exitFullscreen?.();
   }, []);
 
-  // keyboard (global)
+  // keyboard (player + search overlay)
   useEffect(() => {
     if (!nowPlaying && !searchOpen) return;
     const onKey = (e: KeyboardEvent) => {
       // player controls
       if (nowPlaying) {
         const v = videoRef.current;
-        if (e.key === " ") {
+        const showUI = () => showControlsTemporarily();
+
+        // helpers
+        const step = (delta: number) => {
+          if (!v) return;
+          v.currentTime = Math.max(0, Math.min((v.duration || v.currentTime + delta), v.currentTime + delta));
+        };
+        const vol = (delta: number) => {
+          if (!v) return;
+          v.volume = Math.max(0, Math.min(1, v.volume + delta));
+        };
+
+        if (e.key === " " || e.key.toLowerCase() === "k") {
           e.preventDefault();
           if (v) v.paused ? v.play() : v.pause();
+          showUI();
           return;
         }
         if (e.key.toLowerCase() === "f") {
           toggleFullscreen();
+          showUI();
           return;
         }
-        if (v && e.key === "ArrowLeft") {
-          v.currentTime = Math.max(0, v.currentTime - 10);
+        if (e.key === "ArrowLeft") {
+          e.preventDefault();
+          step(-10);
+          showUI();
           return;
         }
-        if (v && e.key === "ArrowRight") {
-          v.currentTime = Math.min(v.duration || v.currentTime + 10, v.currentTime + 10);
+        if (e.key === "ArrowRight") {
+          e.preventDefault();
+          step(10);
+          showUI();
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          vol(0.05);
+          showUI();
+          return;
+        }
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          vol(-0.05);
+          showUI();
+          return;
+        }
+        if (e.key.toLowerCase() === "m") {
+          if (v) v.muted = !v.muted;
+          showUI();
           return;
         }
         if (e.key === "Escape") {
@@ -327,7 +401,7 @@ export default function PS3StyleUI() {
         }
       }
 
-      // search nav
+      // search overlay nav
       if (searchOpen) {
         if (e.key === "Escape") {
           setSearchOpen(false);
@@ -443,7 +517,7 @@ export default function PS3StyleUI() {
 
   /* -------------------------- SEARCH INDEX -------------------------- */
 
-  // tiny in‑memory index: one entry per group (movie or show)
+  // one entry per group (movie or show)
   type SearchItem = {
     key: string;
     title: string;
@@ -492,34 +566,22 @@ export default function PS3StyleUI() {
         if (t === nq || tS === nqS) score = 100; // exact
         else if (t.startsWith(nq) || tS.startsWith(nqS)) score = 80; // prefix
         else if (t.includes(nq) || tS.includes(nqS)) score = 60; // substring
-        // light year boost if query ends with a year
         const yearMatch = qLive.match(/(^|\D)(19|20)\d{2}(\D|$)/);
         if (yearMatch && it.year && yearMatch[0].includes(String(it.year))) score += 5;
         return { it, score };
       })
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score || a.it.title.localeCompare(b.it.title))
-      .slice(0, 8)
+      // no slice: show ALL matches (overlay list scrolls independently)
       .map((x) => x.it);
     return scored;
   }, [qLive, searchIndex]);
 
-  // keep active index in range
+  // clamp active index
   useEffect(() => {
     if (!results.length) setActiveIdx(0);
     else setActiveIdx((i) => Math.min(i, results.length - 1));
   }, [results.length]);
-
-  // close search on outside click
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (!searchOpen) return;
-      const el = searchWrapRef.current;
-      if (el && !el.contains(e.target as Node)) setSearchOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [searchOpen]);
 
   const openFromResult = useCallback(
     (item: SearchItem) => {
@@ -537,6 +599,18 @@ export default function PS3StyleUI() {
     []
   );
 
+  // focus/lock scroll when overlay opens
+  useEffect(() => {
+    if (searchOpen) {
+      setTimeout(() => searchInputRef.current?.focus(), 0);
+      const prev = document.body.style.overflow;
+      document.body.style.overflow = "hidden"; // prevent page scroll while overlay is open
+      return () => {
+        document.body.style.overflow = prev;
+      };
+    }
+  }, [searchOpen]);
+
   /* ---------------------- poster click behaviour ---------------------- */
   const handleSelect = useCallback((g: GroupedMedia) => {
     if (g.kind === "Movie") {
@@ -548,7 +622,74 @@ export default function PS3StyleUI() {
     setSelectedSeason(g.seasons[0]?.seasonName ?? null);
   }, []);
 
+  /* ---------------------- Player UI auto-hide ---------------------- */
+
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const hideTimerRef = useRef<number | null>(null);
+
+  const clearHideTimer = () => {
+    if (hideTimerRef.current != null) {
+      window.clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  };
+
+  const scheduleHide = useCallback(() => {
+    clearHideTimer();
+    // only auto-hide while playing
+    if (!isPlaying) {
+      setControlsVisible(true);
+      return;
+    }
+    hideTimerRef.current = window.setTimeout(() => {
+      setControlsVisible(false);
+    }, 2500);
+  }, [isPlaying]);
+
+  const showControlsTemporarily = useCallback(() => {
+    setControlsVisible(true);
+    scheduleHide();
+  }, [scheduleHide]);
+
+  // When play/pause changes, (re)schedule hiding
+  useEffect(() => {
+    if (!nowPlaying) return;
+    if (isPlaying) scheduleHide();
+    else {
+      clearHideTimer();
+      setControlsVisible(true);
+    }
+    return clearHideTimer;
+  }, [isPlaying, nowPlaying, scheduleHide]);
+
+  // Mouse movement over player shows controls
+  useEffect(() => {
+    if (!nowPlaying) return;
+    const el = playerShellRef.current;
+    if (!el) return;
+    const onMove = () => showControlsTemporarily();
+    el.addEventListener("mousemove", onMove);
+    el.addEventListener("mouseenter", onMove);
+    el.addEventListener("mouseleave", onMove);
+    return () => {
+      el.removeEventListener("mousemove", onMove);
+      el.removeEventListener("mouseenter", onMove);
+      el.removeEventListener("mouseleave", onMove);
+    };
+  }, [nowPlaying, showControlsTemporarily]);
+
   /* ------------------------------- UI -------------------------------- */
+
+  // groups for rows per tab
+  const visibleGroups = media.filter((g) =>
+    activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show"
+  );
+  const chunkSize = Math.ceil(Math.max(1, visibleGroups.length) / 3);
+  const rows = [
+    { title: "Popular", items: visibleGroups.slice(0, chunkSize) },
+    { title: "Recently Added", items: visibleGroups.slice(chunkSize, chunkSize * 2) },
+    { title: "Classics", items: visibleGroups.slice(chunkSize * 2) },
+  ];
 
   return (
     <div className="fa-bg min-h-screen text-white">
@@ -575,60 +716,114 @@ export default function PS3StyleUI() {
 
         <div className="flex-1" />
 
-        {/* SEARCH */}
-        <div ref={searchWrapRef} className="relative hidden sm:block">
-          <input
-            placeholder="Search"
-            className="search text-sm outline-none text-white placeholder-white/70 bg-transparent border border-white/20 rounded-full px-3 py-1 w-64"
-            value={q}
-            onFocus={() => setSearchOpen(true)}
-            onChange={(e) => {
-              setQ(e.target.value);
-              setSearchOpen(true);
+        {/* Right-side actions — consistent chips with SVG icons */}
+        <div className="hidden md:flex items-center gap-2 mr-2">
+          <button
+            className="chip flex items-center gap-2"
+            title="Shuffle a Movie"
+            onClick={() => {
+              const m = media.filter((g) => g.kind === "Movie");
+              if (!m.length) return;
+              const rand = m[Math.floor(Math.random() * m.length)];
+              const file = rand.seasons[0]?.files[0];
+              if (file) setNowPlaying(file);
             }}
-          />
-          {searchOpen && qLive && results.length > 0 && (
-            <div className="absolute right-0 mt-2 w-[22rem] max-h-[70vh] overflow-auto rounded-xl bg-[#0b1220]/95 border border-white/10 shadow-2xl backdrop-blur">
-              {results.map((r, i) => (
-                <button
-                  key={r.key}
-                  className={`w-full flex gap-3 items-center px-3 py-2 text-left hover:bg-white/5 ${
-                    i === activeIdx ? "bg-white/10" : ""
-                  }`}
-                  onMouseEnter={() => setActiveIdx(i)}
-                  onClick={() => openFromResult(r)}
-                >
-                  <img
-                    src={r.poster || POSTER_FALLBACK}
-                    onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
-                    className="w-[34px] h-[50px] object-cover rounded"
-                    alt=""
-                  />
-                  <div className="min-w-0">
-                    <div className="truncate">{r.title}</div>
-                    <div className="text-xs opacity-70">
-                      {r.kind} {r.year ? `• ${r.year}` : ""}
-                    </div>
-                  </div>
-                </button>
-              ))}
-              <div className="px-3 py-2 text-xs opacity-60 border-t border-white/10">
-                {results.length} result{results.length === 1 ? "" : "s"}
-              </div>
-            </div>
-          )}
+          >
+            <ShuffleIcon />
+            <span className="hidden sm:inline">Random</span>
+          </button>
+
+          <button className="chip flex items-center gap-2" title="Theme (placeholder)">
+            <MoonIcon />
+            <span className="hidden sm:inline">Theme</span>
+          </button>
+
+          <button className="chip flex items-center gap-2" title="Settings (placeholder)">
+            <CogIcon />
+            <span className="hidden sm:inline">Settings</span>
+          </button>
         </div>
+
+        {/* Icon-only Search trigger */}
+        <button className="chip p-2" aria-label="Search" title="Search" onClick={() => setSearchOpen(true)}>
+          <SearchIcon />
+        </button>
       </nav>
 
       <main className="pt-24 pb-10">
-        {[
-          { title: "Popular", items: media.filter((g) => (activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show")).slice(0, Math.ceil(Math.max(1, media.length) / 3)) },
-          { title: "Recently Added", items: media.filter((g) => (activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show")).slice(Math.ceil(Math.max(1, media.length) / 3), Math.ceil(Math.max(1, media.length) / 3) * 2) },
-          { title: "Classics", items: media.filter((g) => (activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show")).slice(Math.ceil(Math.max(1, media.length) / 3) * 2) },
-        ].map((row) => (
+        {rows.map((row) => (
           <PosterRow key={row.title} title={row.title} items={row.items} onSelectGroup={handleSelect} />
         ))}
       </main>
+
+      {/* ---------------------- SEARCH OVERLAY (Prime-like) ---------------------- */}
+      {searchOpen && (
+        <div
+          className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm overscroll-none"
+          onClick={() => setSearchOpen(false)}
+        >
+          <div className="mx-auto mt-16 max-w-5xl px-4" onClick={(e) => e.stopPropagation()}>
+            {/* Input bar */}
+            <div className="glass rounded-2xl p-3 md:p-4">
+              <div className="flex items-center gap-3">
+                <SearchIcon />
+                <input
+                  ref={searchInputRef}
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && results[activeIdx]) {
+                      openFromResult(results[activeIdx]);
+                    }
+                    if (e.key === "Escape") setSearchOpen(false);
+                  }}
+                  placeholder="Search"
+                  className="w-full bg-transparent outline-none text-white text-lg md:text-xl placeholder-white/70"
+                />
+                <button className="chip p-2" onClick={() => { setSearchOpen(false); setQ(""); }}>
+                  <XIcon />
+                </button>
+              </div>
+            </div>
+
+            {/* Results (independent scroll, doesn’t affect page) */}
+            {qLive && results.length > 0 && (
+              <div className="mt-3 glass rounded-2xl max-h-[60vh] overflow-y-auto overscroll-contain">
+                {results.map((r, i) => (
+                  <button
+                    key={r.key}
+                    className={`w-full flex gap-4 items-center px-4 py-3 text-left hover:bg-white/5 ${
+                      i === activeIdx ? "bg-white/10" : ""
+                    }`}
+                    onMouseEnter={() => setActiveIdx(i)}
+                    onClick={() => openFromResult(r)}
+                  >
+                    <img
+                      src={r.poster || POSTER_FALLBACK}
+                      onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
+                      className="w-[46px] h-[68px] object-cover rounded"
+                      alt=""
+                    />
+                    <div className="min-w-0">
+                      <div className="truncate text-base md:text-lg">{r.title}</div>
+                      <div className="text-xs opacity-70">
+                        {r.kind} {r.year ? `• ${r.year}` : ""}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+                <div className="px-4 py-2 text-xs opacity-60 border-t border-white/10 sticky bottom-0 bg-black/20 backdrop-blur">
+                  {results.length} result{results.length === 1 ? "" : "s"}
+                </div>
+              </div>
+            )}
+
+            {qLive && results.length === 0 && (
+              <div className="mt-3 glass rounded-2xl p-4 text-sm opacity-80">No results for “{qLive}”.</div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* --------------------------- DETAILS MODAL (TV) --------------------------- */}
       {selected && (
@@ -699,9 +894,7 @@ export default function PS3StyleUI() {
                           }}
                         >
                           <div className="aspect-video w-full bg-black/30 flex items-center justify-center">
-                            <span className="opacity-80 text-sm px-2 text-center truncate">
-                              {ep.name}
-                            </span>
+                            <span className="opacity-80 text-sm px-2 text-center truncate">{ep.name}</span>
                           </div>
                           <div className="p-2 text-left">
                             <span className="block truncate text-xs opacity-80">
@@ -723,12 +916,24 @@ export default function PS3StyleUI() {
       {/* ----------------------------- VIDEO PLAYER ----------------------------- */}
       {nowPlaying && (
         <section className="fixed inset-0 z-[100] bg-black">
-          <div ref={playerShellRef} className="absolute inset-0 flex flex-col">
-            {/* Top bar */}
-            <div className="flex items-center justify-between p-3 md:p-4 bg-gradient-to-b from-black/70 to-transparent">
+          <div
+            ref={playerShellRef}
+            className={`absolute inset-0 flex flex-col ${controlsVisible ? "" : "cursor-none"}`}
+          >
+            {/* Top bar (auto-hide) */}
+            <div
+              className={`transition-opacity duration-300 ${
+                controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+              } flex items-center justify-between p-3 md:p-4 bg-gradient-to-b from-black/70 to-transparent`}
+            >
               <div className="min-w-0">
                 <h5 className="font-semibold drop-shadow truncate">
-                  {nowPlaying.show ? `${nowPlaying.show} — ${nowPlaying.name}` : nowPlaying.name}
+                  {/* Clean title: just name + year */}
+                  {(() => {
+                    const t = nowPlaying.cleanTitle || nowPlaying.name || "Untitled";
+                    const y = nowPlaying.year ? ` (${nowPlaying.year})` : "";
+                    return `${t}${y}`;
+                  })()}
                 </h5>
               </div>
               <div className="flex gap-2">
@@ -756,16 +961,27 @@ export default function PS3StyleUI() {
                 playsInline
                 controls={false}
                 className="absolute inset-0 w-full h-full object-contain bg-black"
+                onClick={() => {
+                  const v = videoRef.current;
+                  if (!v) return;
+                  v.paused ? v.play() : v.pause();
+                  showControlsTemporarily();
+                }}
               />
 
-              {/* center transport controls */}
-              <div className="absolute inset-0 pointer-events-none flex items-center justify-center gap-6">
+              {/* center transport controls (auto-hide) */}
+              <div
+                className={`absolute inset-0 transition-opacity duration-300 ${
+                  controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+                } pointer-events-none flex items-center justify-center gap-6`}
+              >
                 <button
                   className="pointer-events-auto w-16 h-16 md:w-20 md:h-20 rounded-full bg-black/40 border border-white/30 flex items-center justify-center text-2xl backdrop-blur"
                   onClick={() => {
                     const v = videoRef.current;
                     if (!v) return;
                     v.currentTime = Math.max(0, v.currentTime - 10);
+                    showControlsTemporarily();
                   }}
                   title="Back 10s"
                 >
@@ -778,6 +994,7 @@ export default function PS3StyleUI() {
                     const v = videoRef.current;
                     if (!v) return;
                     v.paused ? v.play() : v.pause();
+                    showControlsTemporarily();
                   }}
                   title="Play/Pause"
                 >
@@ -790,6 +1007,7 @@ export default function PS3StyleUI() {
                     const v = videoRef.current;
                     if (!v) return;
                     v.currentTime = Math.min(v.duration || v.currentTime + 10, v.currentTime + 10);
+                    showControlsTemporarily();
                   }}
                   title="Forward 10s"
                 >
@@ -797,8 +1015,12 @@ export default function PS3StyleUI() {
                 </button>
               </div>
 
-              {/* bottom control bar */}
-              <div className="absolute left-0 right-0 bottom-0 p-4 bg-gradient-to-t from-black/80 to-transparent">
+              {/* bottom control bar (auto-hide) */}
+              <div
+                className={`absolute left-0 right-0 bottom-0 transition-opacity duration-300 ${
+                  controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+                } p-4 bg-gradient-to-t from-black/80 to-transparent`}
+              >
                 <div className="flex items-center gap-3 text-sm">
                   <span className="w-16 text-right tabular-nums">{fmtTime(sliderVal ?? current)}</span>
                   <input
@@ -814,6 +1036,7 @@ export default function PS3StyleUI() {
                       const val = Number((e.target as HTMLInputElement).value);
                       if (v) v.currentTime = val;
                       setSliderVal(null);
+                      showControlsTemporarily();
                     }}
                     onTouchStart={() => setSliderVal(current)}
                     onTouchEnd={(e) => {
@@ -821,6 +1044,7 @@ export default function PS3StyleUI() {
                       const val = Number((e.target as HTMLInputElement).value);
                       if (v) v.currentTime = val;
                       setSliderVal(null);
+                      showControlsTemporarily();
                     }}
                     className="flex-1 accent-white"
                   />
