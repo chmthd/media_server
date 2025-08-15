@@ -57,11 +57,7 @@ const fmtTime = (t: number) => {
 
 // tiny normalizer for matching (handles plural/singular crudely)
 const norm = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/['".,!?()\-_:]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  s.toLowerCase().replace(/['".,!?()\-_:]/g, " ").replace(/\s+/g, " ").trim();
 
 const singularize = (s: string) => s.replace(/s\b/g, "");
 
@@ -173,6 +169,7 @@ export default function PS3StyleUI() {
   // selection (TV shows)
   const [selected, setSelected] = useState<GroupedMedia | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
+  const [selectedBackdrop, setSelectedBackdrop] = useState<string | null>(null);
 
   // player
   const [nowPlaying, setNowPlaying] = useState<MediaFile | null>(null);
@@ -189,9 +186,18 @@ export default function PS3StyleUI() {
 
   // search state
   const [q, setQ] = useState("");
-  const [searchOpen, setSearchOpen] = useState(false); 
+  const [searchOpen, setSearchOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  // navbar scroll state (adds solid, opaque style when scrolled)
+  const [navSolid, setNavSolid] = useState(false);
+  useEffect(() => {
+    const onScroll = () => setNavSolid(window.scrollY > 6);
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   /* ---------- manifest only probe ---------- */
   const probeHls = useCallback(
@@ -622,6 +628,41 @@ export default function PS3StyleUI() {
     setSelectedSeason(g.seasons[0]?.seasonName ?? null);
   }, []);
 
+  // compute show "year" from local files (min year across all files)
+  const selectedYear = useMemo(() => {
+    if (!selected) return undefined;
+    const years: number[] = [];
+    selected.seasons.forEach((s) =>
+      s.files.forEach((f) => {
+        if (typeof f.year === "number") years.push(f.year);
+      })
+    );
+    if (!years.length) return undefined;
+    return Math.min(...years);
+  }, [selected]);
+
+  // fetch a wide hero when a show is selected
+  useEffect(() => {
+    let aborted = false;
+    async function fetchBackdrop() {
+      if (!selected || selected.kind !== "TV Show") {
+        setSelectedBackdrop(null);
+        return;
+      }
+      const res = await fetch(
+        `/api/backdrop?type=tv&query=${encodeURIComponent(selected.displayTitle)}${
+          selectedYear ? `&year=${selectedYear}` : ""
+        }`
+      );
+      const data = res.ok ? await res.json() : { backdrop: null as string | null };
+      if (!aborted) setSelectedBackdrop(data.backdrop || null);
+    }
+    fetchBackdrop();
+    return () => {
+      aborted = true;
+    };
+  }, [selected, selectedYear]);
+
   /* ---------------------- Player UI auto-hide ---------------------- */
 
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -693,31 +734,35 @@ export default function PS3StyleUI() {
 
   return (
     <div className="fa-bg min-h-screen text-white">
-      <nav className="navbar glass">
+      {/* NAVBAR */}
+      <nav className={`navbar glass ${navSolid ? "" : ""}`}>
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-full bg-white/20 shadow-inner" />
           <span className="font-semibold text-lg drop-shadow">Local Media Server</span>
         </div>
 
-        <div className="flex items-center gap-2 ml-6">
-          <button
-            className={`chip ${activeTab === "TV" ? "chip-active" : ""}`}
-            onClick={() => setActiveTab("TV")}
-          >
-            TV Shows
-          </button>
-          <button
-            className={`chip ${activeTab === "Movies" ? "chip-active" : ""}`}
-            onClick={() => setActiveTab("Movies")}
-          >
-            Movies
-          </button>
+        {/* Segmented control */}
+        <div className="ml-4">
+          <div className="segment">
+            <button
+              className={`segment-btn ${activeTab === "TV" ? "is-active" : ""}`}
+              onClick={() => setActiveTab("TV")}
+            >
+              TV Shows
+            </button>
+            <button
+              className={`segment-btn ${activeTab === "Movies" ? "is-active" : ""}`}
+              onClick={() => setActiveTab("Movies")}
+            >
+              Movies
+            </button>
+          </div>
         </div>
 
         <div className="flex-1" />
 
-        {/* Right-side actions — consistent chips with SVG icons */}
-        <div className="hidden md:flex items-center gap-2 mr-2">
+        {/* Right actions */}
+        <div className="hidden md:flex items-center gap-2 mr-1">
           <button
             className="chip flex items-center gap-2"
             title="Shuffle a Movie"
@@ -756,7 +801,7 @@ export default function PS3StyleUI() {
         ))}
       </main>
 
-      {/* ---------------------- SEARCH OVERLAY (Prime-like) ---------------------- */}
+      {/* ---------------------- SEARCH OVERLAY ---------------------- */}
       {searchOpen && (
         <div
           className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm overscroll-none"
@@ -786,7 +831,7 @@ export default function PS3StyleUI() {
               </div>
             </div>
 
-            {/* Results (independent scroll, doesn’t affect page) */}
+            {/* Results (independent scroll) */}
             {qLive && results.length > 0 && (
               <div className="mt-3 glass rounded-2xl max-h-[60vh] overflow-y-auto overscroll-contain">
                 {results.map((r, i) => (
@@ -832,81 +877,97 @@ export default function PS3StyleUI() {
           onClick={() => {
             setSelected(null);
             setSelectedSeason(null);
+            setSelectedBackdrop(null);
           }}
         >
           <div
             className="glass w-full max-w-5xl max-h-[85vh] overflow-auto rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="grid grid-cols-1 md:grid-cols-[260px,1fr] gap-0">
-              <div className="relative">
-                <img
-                  src={selected.poster}
-                  alt={selected.displayTitle}
-                  className="w-full h-64 md:h-full object-cover"
-                  onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
-                />
-              </div>
-              <div className="p-4 md:p-6">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-xl md:text-2xl font-semibold">{selected.displayTitle}</h3>
-                  <button className="chip" onClick={() => setSelected(null)}>
-                    ✕ Close
-                  </button>
-                </div>
+            {/* HERO (wide, high-res backdrop) */}
+            <div className="relative h-[38vh] min-h-[240px] w-full overflow-hidden rounded-t-2xl">
+              <img
+                src={selectedBackdrop || selected.poster || POSTER_FALLBACK}
+                alt={selected.displayTitle}
+                className="absolute inset-0 w-full h-full object-cover"
+                onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
+                loading="eager"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+              <div className="absolute left-4 right-4 bottom-4 flex flex-wrap items-end gap-3 justify-between">
+                {/* Left: Title + Year + Season dropdown */}
+                <div className="flex flex-wrap items-center gap-3">
+                  <h3 className="text-2xl md:text-3xl font-semibold drop-shadow">
+                    {selected.displayTitle}
+                    {selectedYear ? <span className="opacity-80 text-base md:text-lg"> ({selectedYear})</span> : null}
+                  </h3>
 
-                <div className="mt-4 grid grid-cols-1 md:grid-cols-[220px,1fr] gap-4">
-                  {/* Seasons list */}
-                  <div className="md:border-r md:border-white/10 pr-0 md:pr-4">
-                    <h4 className="mb-2 font-semibold">Seasons</h4>
-                    <div className="flex md:block gap-2 md:gap-0 overflow-x-auto no-scrollbar">
+                  {/* Seasons dropdown (only what exists locally) */}
+                  {selected.kind === "TV Show" && selected.seasons.length > 0 && (
+                    <label className="sr-only" htmlFor="seasonSelect">Season</label>
+                  )}
+
+                  {selected.kind === "TV Show" && selected.seasons.length > 0 && (
+                    <select
+                      id="seasonSelect"
+                      value={selectedSeason ?? selected.seasons[0]?.seasonName}
+                      onChange={(e) => setSelectedSeason(e.target.value)}
+                      className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm backdrop-blur hover:bg-white/15 focus:outline-none"
+                    >
                       {selected.seasons.map((s) => (
-                        <button
-                          key={s.seasonName}
-                          className={`chip mr-2 mb-2 ${
-                            (selectedSeason ?? selected.seasons[0]?.seasonName) === s.seasonName
-                              ? "chip-active"
-                              : ""
-                          }`}
-                          onClick={() => setSelectedSeason(s.seasonName)}
-                        >
-                          {s.seasonName}
-                        </button>
+                        <option key={s.seasonName} value={s.seasonName}>
+                          {s.seasonName} ({s.files.length})
+                        </option>
                       ))}
-                    </div>
-                  </div>
-
-                  {/* Episodes */}
-                  <div>
-                    <h4 className="mb-2 font-semibold">Episodes</h4>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                      {(selected.seasons.find(
-                        (s) => s.seasonName === (selectedSeason ?? selected.seasons[0]?.seasonName)
-                      )?.files || []
-                      ).map((ep) => (
-                        <button
-                          key={ep.path}
-                          className="group rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 transition"
-                          onClick={() => {
-                            setNowPlaying(ep);
-                            setSelected(null);
-                            setSelectedSeason(null);
-                          }}
-                        >
-                          <div className="aspect-video w-full bg-black/30 flex items-center justify-center">
-                            <span className="opacity-80 text-sm px-2 text-center truncate">{ep.name}</span>
-                          </div>
-                          <div className="p-2 text-left">
-                            <span className="block truncate text-xs opacity-80">
-                              {ep.season ? `${ep.season}` : ""}
-                            </span>
-                            <span className="block truncate text-sm">{ep.name}</span>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                    </select>
+                  )}
                 </div>
+
+                {/* Right: Close */}
+                <button
+                  className="chip"
+                  onClick={() => {
+                    setSelected(null);
+                    setSelectedSeason(null);
+                    setSelectedBackdrop(null);
+                  }}
+                >
+                  ✕ Close
+                </button>
+              </div>
+            </div>
+
+            {/* CONTENT: Episodes only (full width) */}
+            <div className="p-4 md:p-6">
+              <h4 className="mb-2 font-semibold">
+                Episodes — {selectedSeason ?? selected.seasons[0]?.seasonName}
+              </h4>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {(selected.seasons.find(
+                  (s) => s.seasonName === (selectedSeason ?? selected.seasons[0]?.seasonName)
+                )?.files || []
+                ).map((ep) => (
+                  <button
+                    key={ep.path}
+                    className="group rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 transition"
+                    onClick={() => {
+                      setNowPlaying(ep);
+                      setSelected(null);
+                      setSelectedSeason(null);
+                      setSelectedBackdrop(null);
+                    }}
+                  >
+                    <div className="aspect-video w-full bg-black/30 flex items-center justify-center">
+                      <span className="opacity-80 text-sm px-2 text-center truncate">{ep.name}</span>
+                    </div>
+                    <div className="p-2 text-left">
+                      <span className="block truncate text-xs opacity-70">
+                        {ep.season ?? ""}
+                      </span>
+                      <span className="block truncate text-sm">{ep.name}</span>
+                    </div>
+                  </button>
+                ))}
               </div>
             </div>
           </div>

@@ -1,15 +1,27 @@
 @import "tailwindcss";
 
+/* ==================== Design tokens ==================== */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0b0d12;    /* app background (dark, neutral) */
+  --foreground: #e6e7eb;    /* foreground text */
+  --surface:    #0f1218;    /* elevated surfaces (nav/cards) */
+  --border:     rgba(255,255,255,.08);
+  --border-strong: rgba(255,255,255,.14);
+  --muted:      rgba(230,231,235,.64);
+  --ring:       rgba(120,180,255,.45);
 
-  /* Animation defaults */
+  /* Motion */
+  --ease-out: cubic-bezier(.22,1,.36,1);
+  --ease-in: cubic-bezier(.11,.00,.5,0);
+  --dur-1: 160ms;
+  --dur-2: 220ms;
+
+  /* Poster animation */
   --poster-fade-duration: 420ms;
-  --poster-fade-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --poster-fade-ease: var(--ease-out);
   --poster-stagger: 55ms;
   --poster-distance: 10px;
-  --poster-scale-from: 0.97;
+  --poster-scale-from: 0.98;
 }
 
 @theme inline {
@@ -21,35 +33,46 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0b0d12;
+    --foreground: #e6e7eb;
   }
 }
+
+/* ==================== Base ==================== */
+* { box-sizing: border-box; }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Geist, Arial, Helvetica, sans-serif;
+  font-family: Geist, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
+/* Subtle, modern backdrop (low-contrast) */
 .fa-bg {
   background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(46, 196, 255, 0.25), transparent 60%),
-    radial-gradient(900px 500px at 90% 10%, rgba(144, 238, 144, 0.18), transparent 55%),
-    linear-gradient(135deg, #0a0f1f 0%, #0f172a 55%, #0b1220 100%);
+    radial-gradient(1000px 600px at 20% -10%, rgba(120,150,255, .08), transparent 60%),
+    radial-gradient(900px 520px at 85% 10%, rgba(120,255,210, .06), transparent 55%),
+    linear-gradient(180deg, #0b0d12 0%, #0b0d12 100%);
 }
 
+/* ==================== Surfaces / Glass ==================== */
 .glass {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  background: color-mix(in oklab, var(--surface) 88%, black 0%);
+  border: 1px solid var(--border);
+  backdrop-filter: blur(8px) saturate(120%);
+  -webkit-backdrop-filter: blur(8px) saturate(120%);
+  box-shadow:
+    0 8px 24px rgba(0,0,0,.38),
+    inset 0 1px 0 rgba(255,255,255,.06);
+  border-radius: 16px; /* modern rounded */
 }
 
+/* ==================== Navbar ==================== */
 .navbar {
   position: fixed;
-  top: 0; left: 0; right: 0;
+  inset: 0 0 auto 0;
   height: 64px;
   display: flex;
   align-items: center;
@@ -58,38 +81,125 @@ body {
   z-index: 50;
 }
 
+/* chrome container (kept from your JSX) */
+.nav-chrome {
+  overflow: visible;
+  max-width: 100%;
+  border: none;
+  padding-inline: 12px;
+  height: 64px;
+  border-radius: 0;            /* modern flat bar */
+  box-shadow: none;
+}
+
+/* transparent while at top, solid after scroll */
+.nav-float {
+  background: color-mix(in oklab, var(--surface) 72%, black 0%);
+  border: none;
+  box-shadow: none;
+}
+.nav-solid {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-strong);
+  box-shadow: 0 8px 24px rgba(0,0,0,.28);
+}
+
+/* remove decorative line */
+.nav-underline { display: none; }
+
+/* tiny brand bubble still OK (feel free to remove if you want ultra-minimal) */
+.brand-bubble {
+  width: 28px; height: 28px; border-radius: 9999px;
+  background: linear-gradient(180deg, #8aa4ff, #66dbc2);
+  box-shadow: 0 4px 10px rgba(0,0,0,.28);
+}
+
+/* ==================== Segmented control ==================== */
+.segment {
+  display: inline-flex;
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  padding: 2px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+}
+.segment-btn {
+  padding: 6px 10px;
+  border-radius: 9999px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--muted);
+  transition: color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+.segment-btn:hover { color: var(--foreground); transform: translateY(-1px); }
+.segment-btn.is-active {
+  color: var(--foreground);
+  background: rgba(255,255,255,.08);
+  box-shadow: 0 6px 16px rgba(0,0,0,.25);
+}
+
+/* Smaller navbar chips only */
+.navbar .chip {
+  padding: 6px 10px !important;
+  font-size: 0.875rem;
+  line-height: 1;
+}
+.navbar .chip svg { width: 16px; height: 16px; }
+
+/* ==================== Buttons (flat, modern) ==================== */
+.chip {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid var(--border);
+  color: var(--foreground);
+  box-shadow: 0 2px 8px rgba(0,0,0,.20);
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.chip:hover {
+  transform: translateY(-1px);
+  background: rgba(255,255,255,.10);
+  border-color: var(--border-strong);
+  box-shadow: 0 8px 18px rgba(0,0,0,.28), 0 0 0 4px color-mix(in oklab, var(--ring) 18%, transparent);
+}
+.chip:active { transform: translateY(0) scale(.99); }
+.chip-active {
+  background: rgba(255,255,255,.12);
+  border-color: var(--border-strong);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+  color: var(--foreground);
+}
+
+/* ==================== Search ==================== */
 .search { min-width: 260px; }
 
-/* ===== Poster animations ===== */
+/* ==================== Poster grid ==================== */
 @keyframes posterFadeUp {
   from { opacity: 0; transform: translateY(var(--poster-distance)) scale(var(--poster-scale-from)); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
 }
-
 .poster-card { transform-origin: center bottom; }
 .poster-card .poster {
-  border: 3px solid transparent;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
-  transition: transform 160ms ease, box-shadow 200ms ease, border-color 200ms ease;
-
-  animation-name: posterFadeUp;
-  animation-duration: var(--poster-fade-duration);
-  animation-timing-function: var(--poster-fade-ease);
-  animation-fill-mode: both;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 36px rgba(0,0,0,.38);
+  transition: transform var(--dur-1) var(--ease-out), box-shadow var(--dur-2) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+  animation: posterFadeUp var(--poster-fade-duration) var(--poster-fade-ease) both;
   animation-delay: calc(var(--i, 0) * var(--poster-stagger));
 }
-
 .poster-card:hover .poster {
-  transform: translateY(-3px) scale(1.03);
-  border-color: rgba(255, 255, 255, 0.35);
-  box-shadow: 0 28px 60px rgba(0, 0, 0, 0.55);
+  transform: translateY(-3px) scale(1.02);
+  border-color: var(--border-strong);
+  box-shadow: 0 24px 52px rgba(0,0,0,.5);
 }
 
 /* Hide horizontal scrollbar but allow scrolling */
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* PS3-style fade edges */
+/* Edge mask kept (clean carousels) */
 .edge-mask {
   -webkit-mask-image: linear-gradient(to right, transparent 0, #fff 72px, #fff calc(100% - 72px), transparent 100%);
           mask-image: linear-gradient(to right, transparent 0, #fff 72px, #fff calc(100% - 72px), transparent 100%);
@@ -99,28 +209,19 @@ body {
           mask-repeat: no-repeat;
 }
 
-.chip {
-  padding: 10px 14px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.05));
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 9999px;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  transition: transform 140ms ease, box-shadow 140ms ease, background 140ms ease;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+/* ==================== Player HUD micro-transitions ==================== */
+.hud-top, .hud-bottom, .hud-center {
+  transition: transform var(--dur-2) var(--ease-out), opacity var(--dur-2) var(--ease-out);
+  will-change: transform, opacity;
 }
-.chip:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.22);
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.08));
-}
-.chip-active {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0.14));
-  border-color: rgba(255, 255, 255, 0.6);
-  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.42), inset 0 1px 0 rgba(255, 255, 255, 0.28);
-}
+.hud-top--hidden    { transform: translateY(-12px); }
+.hud-top--visible   { transform: translateY(0);     }
+.hud-bottom--hidden { transform: translateY(12px);  }
+.hud-bottom--visible{ transform: translateY(0);     }
+.hud-center--hidden { transform: scale(0.98);       }
+.hud-center--visible{ transform: scale(1);          }
 
-/* Accessibility: respect reduced motion */
+/* ==================== Accessibility ==================== */
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
