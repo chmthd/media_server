@@ -2,9 +2,9 @@
 
 /* ==================== Design tokens ==================== */
 :root {
-  --background: #0b0d12;    /* app background (dark, neutral) */
-  --foreground: #e6e7eb;    /* foreground text */
-  --surface:    #0f1218;    /* elevated surfaces (nav/cards) */
+  --background: #0b0d12;    
+  --foreground: #e6e7eb;    
+  --surface:    #0f1218;   
   --border:     rgba(255,255,255,.08);
   --border-strong: rgba(255,255,255,.14);
   --muted:      rgba(230,231,235,.64);
@@ -49,7 +49,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Subtle, modern backdrop (low-contrast) */
+/* backdrop */
 .fa-bg {
   background:
     radial-gradient(1000px 600px at 20% -10%, rgba(120,150,255, .08), transparent 60%),
@@ -66,7 +66,7 @@ body {
   box-shadow:
     0 8px 24px rgba(0,0,0,.38),
     inset 0 1px 0 rgba(255,255,255,.06);
-  border-radius: 16px; /* modern rounded */
+  border-radius: 16px;
 }
 
 /* ==================== Navbar ==================== */
@@ -81,18 +81,17 @@ body {
   z-index: 50;
 }
 
-/* chrome container (kept from your JSX) */
+/* chrome container */
 .nav-chrome {
   overflow: visible;
   max-width: 100%;
   border: none;
   padding-inline: 12px;
   height: 64px;
-  border-radius: 0;            /* modern flat bar */
+  border-radius: 0;            
   box-shadow: none;
 }
 
-/* transparent while at top, solid after scroll */
 .nav-float {
   background: color-mix(in oklab, var(--surface) 72%, black 0%);
   border: none;
@@ -104,10 +103,8 @@ body {
   box-shadow: 0 8px 24px rgba(0,0,0,.28);
 }
 
-/* remove decorative line */
 .nav-underline { display: none; }
 
-/* tiny brand bubble still OK (feel free to remove if you want ultra-minimal) */
 .brand-bubble {
   width: 28px; height: 28px; border-radius: 9999px;
   background: linear-gradient(180deg, #8aa4ff, #66dbc2);
@@ -138,7 +135,6 @@ body {
   box-shadow: 0 6px 16px rgba(0,0,0,.25);
 }
 
-/* Smaller navbar chips only */
 .navbar .chip {
   padding: 6px 10px !important;
   font-size: 0.875rem;
@@ -195,11 +191,9 @@ body {
   box-shadow: 0 24px 52px rgba(0,0,0,.5);
 }
 
-/* Hide horizontal scrollbar but allow scrolling */
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 
-/* Edge mask kept (clean carousels) */
 .edge-mask {
   -webkit-mask-image: linear-gradient(to right, transparent 0, #fff 72px, #fff calc(100% - 72px), transparent 100%);
           mask-image: linear-gradient(to right, transparent 0, #fff 72px, #fff calc(100% - 72px), transparent 100%);
@@ -221,7 +215,6 @@ body {
 .hud-center--hidden { transform: scale(0.98);       }
 .hud-center--visible{ transform: scale(1);          }
 
-/* ==================== Accessibility ==================== */
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }

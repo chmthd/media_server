@@ -11,7 +11,7 @@ type MediaFile = {
   show: string;
   type: "Movie" | "TV Show";
   rootFolder: string;
-  season?: string;
+  season?: string; // e.g. "S01" or "Season 1"
   cleanTitle: string;
   year?: number;
 };
@@ -22,10 +22,22 @@ type GroupedMedia = {
   poster: string;
   kind: "Movie" | "TV Show";
   seasons: {
-    seasonName: string;
+    seasonName: string; // e.g. "S01"
     poster: string;
     files: MediaFile[];
   }[];
+};
+
+type TmdbEpisode = {
+  episode_number: number;
+  name: string;
+  overview?: string;
+  still_path?: string | null;
+};
+
+type EpisodesResponse = {
+  episodes: Record<number, TmdbEpisode>;
+  imageBase?: string;
 };
 
 /* ------------------------ Constants & Utils ----------------------- */
@@ -55,11 +67,45 @@ const fmtTime = (t: number) => {
     : `${m}:${String(sec).padStart(2, "0")}`;
 };
 
-// tiny normalizer for matching (handles plural/singular crudely)
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+// normalize for search
 const norm = (s: string) =>
   s.toLowerCase().replace(/['".,!?()\-_:]/g, " ").replace(/\s+/g, " ").trim();
 
 const singularize = (s: string) => s.replace(/s\b/g, "");
+
+// try to parse SxxExx from a filename (or path)
+const parseEpisodeFromName = (name: string): { season?: number; episode?: number } => {
+  // S01E02
+  const re = /(?:^|[^a-z0-9])s(\d{1,2})e(\d{1,3})(?:[^a-z0-9]|$)/i;
+  const m = name.match(re);
+  if (m) return { season: Number(m[1]), episode: Number(m[2]) };
+
+  // 1x02
+  const re2 = /(?:^|[^a-z0-9])(\d{1,2})x(\d{1,3})(?:[^a-z0-9]|$)/i;
+  const n = name.match(re2);
+  if (n) return { season: Number(n[1]), episode: Number(n[2]) };
+
+  // E02 / e02
+  const re3 = /(?:^|[^a-z0-9])e(\d{1,3})(?:[^a-z0-9]|$)/i;
+  const eOnly = name.match(re3);
+  if (eOnly) return { episode: Number(eOnly[1]) };
+
+  // "Episode 02"
+  const re4 = /episode\s*(\d{1,3})/i;
+  const epWord = name.match(re4);
+  if (epWord) return { episode: Number(epWord[1]) };
+
+  return {};
+};
+
+// normalize season label like "S01" / "Season 1" to numeric 1
+const seasonLabelToNumber = (s?: string | null): number | undefined => {
+  if (!s) return undefined;
+  const m = s.match(/(?:s|season)\s*(\d{1,2})/i);
+  return m ? Number(m[1]) : undefined;
+};
 
 /* --------------------------- Icons (SVG) --------------------------- */
 
@@ -160,6 +206,83 @@ function PosterRow({
   );
 }
 
+/* ------------------------ Episodes meta hook ------------------------ */
+
+const EPISODE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function useSeasonEpisodesMeta(
+  showTitle: string | undefined,
+  year: number | undefined,
+  seasonLabel: string | undefined
+): { byEp: Record<number, TmdbEpisode>; imageBase?: string; ready: boolean } {
+  const [state, setState] = useState<{ byEp: Record<number, TmdbEpisode>; imageBase?: string; ready: boolean }>({
+    byEp: {},
+    imageBase: undefined,
+    ready: false,
+  });
+
+  useEffect(() => {
+    const seasonNum = seasonLabelToNumber(seasonLabel);
+    if (!showTitle || !seasonNum) {
+      setState({ byEp: {}, imageBase: undefined, ready: true });
+      return;
+    }
+
+    const key = `eps:${showTitle}:${year ?? ""}:S${pad2(seasonNum)}`;
+    const cached = localStorage.getItem(key);
+    const cachedAt = localStorage.getItem(`${key}:t`);
+
+    const parseCached = () => {
+      if (cached && cachedAt && Date.now() - Number(cachedAt) < EPISODE_CACHE_TTL_MS) {
+        try {
+          const parsed: EpisodesResponse = JSON.parse(cached);
+          setState({ byEp: parsed.episodes || {}, imageBase: parsed.imageBase, ready: true });
+          return true;
+        } catch {
+          // ignore parse errors; fall through to fetch
+        }
+      }
+      return false;
+    };
+
+    if (parseCached()) return;
+
+    let aborted = false;
+    (async () => {
+      try {
+        // primary attempt (with year if we have one)
+        let url = `/api/episodes?query=${encodeURIComponent(showTitle)}&season=${seasonNum}${
+          year ? `&year=${year}` : ""
+        }`;
+        let res = await fetch(url);
+        let data: EpisodesResponse = res.ok ? await res.json() : { episodes: {} };
+
+        // Fallback: try again without a year filter if no episodes returned
+        if (Object.keys(data.episodes || {}).length === 0 && year) {
+          url = `/api/episodes?query=${encodeURIComponent(showTitle)}&season=${seasonNum}`;
+          res = await fetch(url);
+          data = res.ok ? await res.json() : { episodes: {} };
+        }
+
+        if (aborted) return;
+
+        setState({ byEp: data.episodes || {}, imageBase: data.imageBase, ready: true });
+        // cache
+        localStorage.setItem(key, JSON.stringify(data));
+        localStorage.setItem(`${key}:t`, String(Date.now()));
+      } catch {
+        if (!aborted) setState({ byEp: {}, imageBase: undefined, ready: true });
+      }
+    })();
+
+    return () => {
+      aborted = true;
+    };
+  }, [showTitle, year, seasonLabel]);
+
+  return state;
+}
+
 /* ----------------------------- Main Page ---------------------------- */
 
 export default function PS3StyleUI() {
@@ -190,7 +313,7 @@ export default function PS3StyleUI() {
   const [activeIdx, setActiveIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // navbar scroll state (adds solid, opaque style when scrolled)
+  // navbar scroll state
   const [navSolid, setNavSolid] = useState(false);
   useEffect(() => {
     const onScroll = () => setNavSolid(window.scrollY > 6);
@@ -351,7 +474,6 @@ export default function PS3StyleUI() {
         const v = videoRef.current;
         const showUI = () => showControlsTemporarily();
 
-        // helpers
         const step = (delta: number) => {
           if (!v) return;
           v.currentTime = Math.max(0, Math.min((v.duration || v.currentTime + delta), v.currentTime + delta));
@@ -460,9 +582,10 @@ export default function PS3StyleUI() {
             seasons: [{ seasonName: "Movie", poster: groupPoster, files: list }],
           };
         } else {
+          // group files by season
           const sMap = list.reduce((mm: Record<string, MediaFile[]>, f) => {
-            const s = f.season || "Season 1";
-            (mm[s] ||= []).push(f);
+            const label = f.season || "S01";
+            (mm[label] ||= []).push(f);
             return mm;
           }, {});
           const seasons = await Promise.all(
@@ -497,9 +620,7 @@ export default function PS3StyleUI() {
           const parsed = JSON.parse(cached) as GroupedMedia[];
           if (!cancelled) setMedia(parsed);
           return;
-        } catch {
-          /* ignore cache parse error */
-        }
+        } catch {}
       }
 
       const res = await fetch("/api/media");
@@ -522,8 +643,6 @@ export default function PS3StyleUI() {
   }, [buildGroups]);
 
   /* -------------------------- SEARCH INDEX -------------------------- */
-
-  // one entry per group (movie or show)
   type SearchItem = {
     key: string;
     title: string;
@@ -553,7 +672,6 @@ export default function PS3StyleUI() {
     });
   }, [media]);
 
-  // debounced query
   const [qLive, setQLive] = useState("");
   useEffect(() => {
     const id = setTimeout(() => setQLive(q), 120);
@@ -569,21 +687,19 @@ export default function PS3StyleUI() {
         const t = it.titleNorm;
         const tS = it.titleNormSingular;
         let score = 0;
-        if (t === nq || tS === nqS) score = 100; // exact
-        else if (t.startsWith(nq) || tS.startsWith(nqS)) score = 80; // prefix
-        else if (t.includes(nq) || tS.includes(nqS)) score = 60; // substring
+        if (t === nq || tS === nqS) score = 100;
+        else if (t.startsWith(nq) || tS.startsWith(nqS)) score = 80;
+        else if (t.includes(nq) || tS.includes(nqS)) score = 60;
         const yearMatch = qLive.match(/(^|\D)(19|20)\d{2}(\D|$)/);
         if (yearMatch && it.year && yearMatch[0].includes(String(it.year))) score += 5;
         return { it, score };
       })
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score || a.it.title.localeCompare(b.it.title))
-      // no slice: show ALL matches (overlay list scrolls independently)
       .map((x) => x.it);
     return scored;
   }, [qLive, searchIndex]);
 
-  // clamp active index
   useEffect(() => {
     if (!results.length) setActiveIdx(0);
     else setActiveIdx((i) => Math.min(i, results.length - 1));
@@ -605,12 +721,11 @@ export default function PS3StyleUI() {
     []
   );
 
-  // focus/lock scroll when overlay opens
   useEffect(() => {
     if (searchOpen) {
       setTimeout(() => searchInputRef.current?.focus(), 0);
       const prev = document.body.style.overflow;
-      document.body.style.overflow = "hidden"; // prevent page scroll while overlay is open
+      document.body.style.overflow = "hidden";
       return () => {
         document.body.style.overflow = prev;
       };
@@ -628,7 +743,7 @@ export default function PS3StyleUI() {
     setSelectedSeason(g.seasons[0]?.seasonName ?? null);
   }, []);
 
-  // compute show "year" from local files (min year across all files)
+  // compute show year (min across files)
   const selectedYear = useMemo(() => {
     if (!selected) return undefined;
     const years: number[] = [];
@@ -641,7 +756,7 @@ export default function PS3StyleUI() {
     return Math.min(...years);
   }, [selected]);
 
-  // fetch a wide hero when a show is selected
+  // wide hero backdrop
   useEffect(() => {
     let aborted = false;
     async function fetchBackdrop() {
@@ -677,7 +792,6 @@ export default function PS3StyleUI() {
 
   const scheduleHide = useCallback(() => {
     clearHideTimer();
-    // only auto-hide while playing
     if (!isPlaying) {
       setControlsVisible(true);
       return;
@@ -692,7 +806,6 @@ export default function PS3StyleUI() {
     scheduleHide();
   }, [scheduleHide]);
 
-  // When play/pause changes, (re)schedule hiding
   useEffect(() => {
     if (!nowPlaying) return;
     if (isPlaying) scheduleHide();
@@ -703,7 +816,6 @@ export default function PS3StyleUI() {
     return clearHideTimer;
   }, [isPlaying, nowPlaying, scheduleHide]);
 
-  // Mouse movement over player shows controls
   useEffect(() => {
     if (!nowPlaying) return;
     const el = playerShellRef.current;
@@ -721,7 +833,6 @@ export default function PS3StyleUI() {
 
   /* ------------------------------- UI -------------------------------- */
 
-  // groups for rows per tab
   const visibleGroups = media.filter((g) =>
     activeTab === "Movies" ? g.kind === "Movie" : g.kind === "TV Show"
   );
@@ -731,6 +842,26 @@ export default function PS3StyleUI() {
     { title: "Recently Added", items: visibleGroups.slice(chunkSize, chunkSize * 2) },
     { title: "Classics", items: visibleGroups.slice(chunkSize * 2) },
   ];
+
+  // ----- episodes meta for the selected show/season
+  const { byEp: epMeta, imageBase, ready: epReady } = useSeasonEpisodesMeta(
+    selected?.displayTitle,
+    selectedYear,
+    selectedSeason ?? selected?.seasons[0]?.seasonName
+  );
+
+  // the selected season's local files
+  const currentSeasonFiles: MediaFile[] = useMemo(() => {
+    if (!selected) return [];
+    const label = selectedSeason ?? selected.seasons[0]?.seasonName;
+    const list = selected.seasons.find((s) => s.seasonName === label)?.files ?? [];
+    // sort by parsed episode number if available
+    return [...list].sort((a, b) => {
+      const ea = parseEpisodeFromName(a.name).episode ?? 0;
+      const eb = parseEpisodeFromName(b.name).episode ?? 0;
+      return ea - eb || a.name.localeCompare(b.name);
+    });
+  }, [selected, selectedSeason]);
 
   return (
     <div className="fa-bg min-h-screen text-white">
@@ -884,7 +1015,7 @@ export default function PS3StyleUI() {
             className="glass w-full max-w-5xl max-h-[85vh] overflow-auto rounded-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* HERO (wide, high-res backdrop) */}
+            {/* HERO */}
             <div className="relative h-[38vh] min-h-[240px] w-full overflow-hidden rounded-t-2xl">
               <img
                 src={selectedBackdrop || selected.poster || POSTER_FALLBACK}
@@ -937,37 +1068,65 @@ export default function PS3StyleUI() {
               </div>
             </div>
 
-            {/* CONTENT: Episodes only (full width) */}
+            {/* CONTENT: Episodes */}
             <div className="p-4 md:p-6">
               <h4 className="mb-2 font-semibold">
                 Episodes — {selectedSeason ?? selected.seasons[0]?.seasonName}
               </h4>
+
+              {!epReady && <div className="opacity-70 text-sm mb-2">Loading episode details…</div>}
+
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {(selected.seasons.find(
-                  (s) => s.seasonName === (selectedSeason ?? selected.seasons[0]?.seasonName)
-                )?.files || []
-                ).map((ep) => (
-                  <button
-                    key={ep.path}
-                    className="group rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 transition"
-                    onClick={() => {
-                      setNowPlaying(ep);
-                      setSelected(null);
-                      setSelectedSeason(null);
-                      setSelectedBackdrop(null);
-                    }}
-                  >
-                    <div className="aspect-video w-full bg-black/30 flex items-center justify-center">
-                      <span className="opacity-80 text-sm px-2 text-center truncate">{ep.name}</span>
-                    </div>
-                    <div className="p-2 text-left">
-                      <span className="block truncate text-xs opacity-70">
-                        {ep.season ?? ""}
-                      </span>
-                      <span className="block truncate text-sm">{ep.name}</span>
-                    </div>
-                  </button>
-                ))}
+                {currentSeasonFiles.map((file) => {
+                  const parsed = parseEpisodeFromName(file.name);
+                  const epNo = parsed.episode;
+                  const tmdb = epNo ? epMeta[epNo] : undefined;
+
+                  const title =
+                    tmdb?.name
+                      ? `Episode ${pad2(epNo!)} — ${tmdb.name}`
+                      : epNo
+                        ? `Episode ${pad2(epNo)}`
+                        : file.name;
+
+                  const stillSrc =
+                    tmdb?.still_path && imageBase ? `${imageBase}/w780${tmdb.still_path}` : undefined;
+
+                  return (
+                    <button
+                      key={file.path}
+                      className="group rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 transition"
+                      onClick={() => {
+                        setNowPlaying(file);
+                        setSelected(null);
+                        setSelectedSeason(null);
+                        setSelectedBackdrop(null);
+                      }}
+                      title={title}
+                    >
+                      <div className="aspect-video w-full bg-black/30 overflow-hidden">
+                        {stillSrc ? (
+                          <img
+                            src={stillSrc}
+                            alt={title}
+                            className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"
+                            onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <span className="opacity-80 text-sm px-2 text-center truncate">{title}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-2 text-left">
+                        <span className="block truncate text-xs opacity-70">
+                          {selectedSeason ?? ""}
+                        </span>
+                        <span className="block truncate text-sm">{title}</span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -989,7 +1148,6 @@ export default function PS3StyleUI() {
             >
               <div className="min-w-0">
                 <h5 className="font-semibold drop-shadow truncate">
-                  {/* Clean title: just name + year */}
                   {(() => {
                     const t = nowPlaying.cleanTitle || nowPlaying.name || "Untitled";
                     const y = nowPlaying.year ? ` (${nowPlaying.year})` : "";
@@ -1030,7 +1188,7 @@ export default function PS3StyleUI() {
                 }}
               />
 
-              {/* center transport controls (auto-hide) */}
+              {/* center transport controls */}
               <div
                 className={`absolute inset-0 transition-opacity duration-300 ${
                   controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -1076,7 +1234,7 @@ export default function PS3StyleUI() {
                 </button>
               </div>
 
-              {/* bottom control bar (auto-hide) */}
+              {/* bottom control bar */}
               <div
                 className={`absolute left-0 right-0 bottom-0 transition-opacity duration-300 ${
                   controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
