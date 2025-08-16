@@ -110,6 +110,7 @@ const seasonLabelToNumber = (s?: string | null): number | undefined => {
 /* --------------------------- Icons (SVG) --------------------------- */
 
 const iconCls = "w-4 h-4 md:w-5 md:h-5";
+
 function SearchIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconCls} {...props}>
@@ -143,6 +144,33 @@ function XIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={iconCls} {...props}>
       <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6l-12 12" />
+    </svg>
+  );
+}
+
+// Player icons
+const volIconCls = "w-5 h-5 md:w-6 md:h-6";
+function VolumeMuteIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={volIconCls} {...props}>
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M9 9 4 12h-1v0h1l5 3V9zM14 10l6 6M20 10l-6 6" />
+    </svg>
+  );
+}
+function VolumeLowIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={volIconCls} {...props}>
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M9 9 4 12h-1v0h1l5 3V9z" />
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M14 12a3 3 0 0 0 0-6" />
+    </svg>
+  );
+}
+function VolumeHighIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={volIconCls} {...props}>
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M9 9 4 12h-1v0h1l5 3V9z" />
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M14 8a4 4 0 0 1 0 8" />
+      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M16.5 5.5a7 7 0 0 1 0 13" />
     </svg>
   );
 }
@@ -238,9 +266,7 @@ function useSeasonEpisodesMeta(
           const parsed: EpisodesResponse = JSON.parse(cached);
           setState({ byEp: parsed.episodes || {}, imageBase: parsed.imageBase, ready: true });
           return true;
-        } catch {
-          // ignore parse errors; fall through to fetch
-        }
+        } catch {}
       }
       return false;
     };
@@ -307,13 +333,17 @@ export default function PS3StyleUI() {
   const [sliderVal, setSliderVal] = useState<number | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // volume state
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+
   // search state
   const [q, setQ] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // navbar scroll state
+  // navbar: blur only after scroll
   const [navSolid, setNavSolid] = useState(false);
   useEffect(() => {
     const onScroll = () => setNavSolid(window.scrollY > 6);
@@ -384,7 +414,7 @@ export default function PS3StyleUI() {
           const fatal = data.fatal || data.type === Hls.ErrorTypes.NETWORK_ERROR;
           const fragIssue =
             data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR ||
-            data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT;
+            Hls.ErrorDetails.FRAG_LOAD_TIMEOUT === data.details;
           if (fatal || fragIssue) {
             hls.destroy();
             hlsRef.current = null;
@@ -450,6 +480,30 @@ export default function PS3StyleUI() {
     };
   }, [sliderVal, nowPlaying]);
 
+  // keep volume/muted in sync with element + persist
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    const savedVol = Number(localStorage.getItem("player:vol") ?? "1");
+    const savedMuted = localStorage.getItem("player:muted") === "1";
+    if (!Number.isNaN(savedVol)) v.volume = Math.max(0, Math.min(1, savedVol));
+    v.muted = savedMuted;
+
+    setVolume(v.volume);
+    setMuted(v.muted);
+
+    const onVol = () => {
+      setVolume(v.volume);
+      setMuted(v.muted);
+      localStorage.setItem("player:vol", String(v.volume));
+      localStorage.setItem("player:muted", v.muted ? "1" : "0");
+    };
+
+    v.addEventListener("volumechange", onVol);
+    return () => v.removeEventListener("volumechange", onVol);
+  }, [nowPlaying]);
+
   // fullscreen
   useEffect(() => {
     const onFs = () => setIsFullscreen(Boolean((document as any).fullscreenElement));
@@ -469,11 +523,9 @@ export default function PS3StyleUI() {
   useEffect(() => {
     if (!nowPlaying && !searchOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      // player controls
       if (nowPlaying) {
         const v = videoRef.current;
         const showUI = () => showControlsTemporarily();
-
         const step = (delta: number) => {
           if (!v) return;
           v.currentTime = Math.max(0, Math.min((v.duration || v.currentTime + delta), v.currentTime + delta));
@@ -595,7 +647,7 @@ export default function PS3StyleUI() {
                   sName
                 )}${first.year ? `&year=${first.year}` : ""}`
               );
-              const sData = sRes.ok ? await sRes.json() : { poster: null as string | null };
+              const sData = sRes.ok ? await sRes.json() : { poster: null as string | null }; // <-- fixed sRes
               return { seasonName: sName, poster: sData.poster || POSTER_FALLBACK, files: sMap[sName] };
             })
           );
@@ -806,6 +858,25 @@ export default function PS3StyleUI() {
     scheduleHide();
   }, [scheduleHide]);
 
+  // volume helpers
+  const toggleMute = useCallback(() => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.muted = !v.muted;
+    showControlsTemporarily();
+  }, [showControlsTemporarily]);
+
+  const setVolumeSafe = useCallback(
+    (val: number) => {
+      const v = videoRef.current;
+      if (!v) return;
+      v.volume = Math.max(0, Math.min(1, val));
+      if (v.volume > 0 && v.muted) v.muted = false;
+      showControlsTemporarily();
+    },
+    [showControlsTemporarily]
+  );
+
   useEffect(() => {
     if (!nowPlaying) return;
     if (isPlaying) scheduleHide();
@@ -863,13 +934,28 @@ export default function PS3StyleUI() {
     });
   }, [selected, selectedSeason]);
 
+  // choose correct volume icon
+  const VolumeIcon = muted || volume === 0 ? VolumeMuteIcon : volume < 0.5 ? VolumeLowIcon : VolumeHighIcon;
+
   return (
     <div className="fa-bg min-h-screen text-white">
       {/* NAVBAR */}
-      <nav className={`navbar glass ${navSolid ? "" : ""}`}>
+      <nav
+        className={[
+          "fixed top-0 left-0 right-0 z-30 transition-all duration-300",
+          "px-4 md:px-6 py-3 flex items-center gap-3",
+          navSolid
+            ? "bg-black/60 backdrop-blur-md border-b border-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
+            : "bg-transparent"
+        ].join(" ")}
+      >
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-white/20 shadow-inner" />
-          <span className="font-semibold text-lg drop-shadow">Local Media Server</span>
+          {/* Make the logo larger by increasing h- classes; w-auto keeps aspect ratio */}
+          <img
+            src="/img/logo.png"
+            alt="Media Vault Logo"
+            className="h-12 sm:h-14 lg:h-20 w-auto object-contain"
+          />
         </div>
 
         {/* Segmented control */}
@@ -1204,7 +1290,7 @@ export default function PS3StyleUI() {
                   }}
                   title="Back 10s"
                 >
-                  ⟲10
+                  ⟲
                 </button>
 
                 <button
@@ -1230,7 +1316,7 @@ export default function PS3StyleUI() {
                   }}
                   title="Forward 10s"
                 >
-                  10⟳
+                  ⟳
                 </button>
               </div>
 
@@ -1241,7 +1327,10 @@ export default function PS3StyleUI() {
                 } p-4 bg-gradient-to-t from-black/80 to-transparent`}
               >
                 <div className="flex items-center gap-3 text-sm">
+                  {/* current time */}
                   <span className="w-16 text-right tabular-nums">{fmtTime(sliderVal ?? current)}</span>
+
+                  {/* seek slider */}
                   <input
                     type="range"
                     min={0}
@@ -1266,8 +1355,34 @@ export default function PS3StyleUI() {
                       showControlsTemporarily();
                     }}
                     className="flex-1 accent-white"
+                    aria-label="Seek"
                   />
+
+                  {/* duration */}
                   <span className="w-16 tabular-nums">{fmtTime(duration)}</span>
+
+                  {/* volume controls (SVG icons) */}
+                  <button
+                    className="chip px-3 py-1"
+                    onClick={toggleMute}
+                    title={muted ? "Unmute" : "Mute"}
+                    aria-label={muted ? "Unmute" : "Mute"}
+                  >
+                    <VolumeIcon />
+                  </button>
+
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={muted ? 0 : volume}
+                    onChange={(e) => setVolumeSafe(Number(e.target.value))}
+                    onMouseDown={showControlsTemporarily}
+                    onTouchStart={showControlsTemporarily}
+                    className="w-24 md:w-32 accent-white"
+                    aria-label="Volume"
+                  />
                 </div>
               </div>
             </div>
