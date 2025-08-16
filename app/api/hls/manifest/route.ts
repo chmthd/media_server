@@ -23,7 +23,13 @@ export async function GET(req: NextRequest) {
   const manifestPath = path.join(dir, "index.m3u8");
 
   const ok = await waitForFile(manifestPath, 12000);
-  if (!ok) return new Response("#EXTM3U\n# Waiting for transcoder…", { status: 202 });
+  if (!ok) {
+    // hint the client to retry soon
+    return new Response("#EXTM3U\n# Waiting for transcoder…", {
+      status: 202,
+      headers: { "Cache-Control": "no-store" },
+    });
+  }
 
   let text = await fsp.readFile(manifestPath, "utf8");
   text = text
@@ -38,7 +44,8 @@ export async function GET(req: NextRequest) {
   return new Response(text, {
     headers: {
       "Content-Type": "application/vnd.apple.mpegurl",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "no-store",
+      "ETag": `"${Date.now()}"`, // cheap change trigger
     },
   });
 }

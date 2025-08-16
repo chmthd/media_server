@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
   return new Response(stream as any, {
     headers: {
       "Content-Type": "video/mp2t",
-      "Cache-Control": "no-cache",
+      "Cache-Control": "public, max-age=30",
     },
   });
 }

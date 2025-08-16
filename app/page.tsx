@@ -157,7 +157,6 @@ function VolumeLowIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={volIconCls} {...props}>
       <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M9 9 4 12h-1v0h1l5 3V9z" />
-      <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M14 12a3 3 0 0 0 0-6" />
     </svg>
   );
 }
@@ -418,7 +417,7 @@ export default function PS3StyleUI() {
     []
   );
 
-  /* ------------------ player setup and fallback ------------------ */
+  /* ------------------ player setup and fallback (native first) ------------------ */
   useEffect(() => {
     const el = videoRef.current;
     const file = nowPlaying;
@@ -436,23 +435,35 @@ export default function PS3StyleUI() {
       setSliderVal(null);
 
       const streamUrl = `/api/stream?file=${encodeURIComponent(fileArg.path)}`;
-      const probe = await probeHls(fileArg.path);
 
+      // 1) Try native progressive first (best path → GPU decode, no JS transmux)
+      elArg.src = streamUrl;
+      try {
+        await elArg.play();
+        if (!cancelled) setIsPlaying(true);
+        return;
+      } catch {
+        // fall through
+      }
+
+      // 2) Fallback to HLS (server will try copy first / GPU transcode if needed)
+      const probe = await probeHls(fileArg.path);
       if (!probe.ok || !probe.m3u8) {
         if (cancelled) return;
+        // final attempt: progressive again (in case autoplay got blocked)
         elArg.src = streamUrl;
         elArg.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
         return;
       }
 
-      const m3u8 = probe.m3u8;
+      const m3u8 = probe.m3u8!;
 
       if (Hls.isSupported()) {
         const hls = new Hls({
-          maxBufferLength: 30,
+          maxBufferLength: 20,
           lowLatencyMode: false,
-          fragLoadingRetryDelay: 500,
-          manifestLoadingRetryDelay: 500,
+          fragLoadingRetryDelay: 600,
+          manifestLoadingRetryDelay: 600,
         });
         hlsRef.current = hls;
         hls.attachMedia(elArg);
@@ -715,7 +726,7 @@ export default function PS3StyleUI() {
       const cachedAt = localStorage.getItem("mediaCacheTime");
       const maxAge = 10 * 60 * 1000;
 
-    if (cached && cachedAt && Date.now() - parseInt(cachedAt) < maxAge) {
+      if (cached && cachedAt && Date.now() - parseInt(cachedAt) < maxAge) {
         try {
           const parsed = JSON.parse(cached) as GroupedMedia[];
           if (!cancelled) setMedia(parsed);
@@ -996,17 +1007,10 @@ export default function PS3StyleUI() {
             : "bg-transparent"
         ].join(" ")}
       >
-        <div className="flex items-center gap-3">
-          {/* Larger logo; also controlled by --nav-logo-h via .nav-logo */}
-          <img
-            src="/img/logo.png"
-            alt="Media Vault Logo"
-            className="nav-logo w-auto object-contain h-12 sm:h-14 md:h-[var(--nav-logo-h)]"
-          />
-        </div>
+        <div className="flex items-center gap-3">{/* logo slot */}</div>
 
         {/* Segmented control */}
-        <div className="ml-4">
+        <div>
           <div className="segment">
             <button
               className={`segment-btn ${activeTab === "TV" ? "is-active" : ""}`}
@@ -1025,7 +1029,7 @@ export default function PS3StyleUI() {
 
         <div className="flex-1" />
 
-        {/* Right actions (exact same height as segmented pill) */}
+        {/* Right actions */}
         <div className="hidden md:flex items-center gap-2 mr-1">
           <button
             className="chip flex items-center gap-2"
@@ -1053,7 +1057,7 @@ export default function PS3StyleUI() {
           </button>
         </div>
 
-        {/* Icon-only Search (same height as well) */}
+        {/* Icon-only Search */}
         <button className="chip" aria-label="Search" title="Search" onClick={() => setSearchOpen(true)}>
           <SearchIcon />
         </button>
@@ -1210,7 +1214,7 @@ export default function PS3StyleUI() {
               {!epReady && <div className="opacity-70 text-sm mb-2">Loading episode details…</div>}
 
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {currentSeasonFiles.map((file) => {
+                {currentSeasonFiles.map((file: MediaFile) => {
                   const parsed = parseEpisodeFromName(file.name);
                   const epNo = parsed.episode;
                   const tmdb = epNo ? epMeta[epNo] : undefined;
