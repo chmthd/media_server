@@ -77,22 +77,18 @@ const singularize = (s: string) => s.replace(/s\b/g, "");
 
 // try to parse SxxExx from a filename (or path)
 const parseEpisodeFromName = (name: string): { season?: number; episode?: number } => {
-  // S01E02
   const re = /(?:^|[^a-z0-9])s(\d{1,2})e(\d{1,3})(?:[^a-z0-9]|$)/i;
   const m = name.match(re);
   if (m) return { season: Number(m[1]), episode: Number(m[2]) };
 
-  // 1x02
   const re2 = /(?:^|[^a-z0-9])(\d{1,2})x(\d{1,3})(?:[^a-z0-9]|$)/i;
   const n = name.match(re2);
   if (n) return { season: Number(n[1]), episode: Number(n[2]) };
 
-  // E02 / e02
   const re3 = /(?:^|[^a-z0-9])e(\d{1,3})(?:[^a-z0-9]|$)/i;
   const eOnly = name.match(re3);
   if (eOnly) return { episode: Number(eOnly[1]) };
 
-  // "Episode 02"
   const re4 = /episode\s*(\d{1,3})/i;
   const epWord = name.match(re4);
   if (epWord) return { episode: Number(epWord[1]) };
@@ -148,7 +144,7 @@ function XIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-// Player icons
+/* Player volume icons */
 const volIconCls = "w-5 h-5 md:w-6 md:h-6";
 function VolumeMuteIcon(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -172,6 +168,69 @@ function VolumeHighIcon(props: React.SVGProps<SVGSVGElement>) {
       <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M14 8a4 4 0 0 1 0 8" />
       <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M16.5 5.5a7 7 0 0 1 0 13" />
     </svg>
+  );
+}
+
+/* ---------------------- PosterCard (hover effects) ---------------------- */
+
+function PosterCard({
+  group,
+  idx,
+  onClick,
+}: {
+  group: GroupedMedia;
+  idx: number;
+  onClick: () => void;
+}) {
+  const cardRef = useRef<HTMLButtonElement | null>(null);
+
+  // tiny tilt based on pointer position
+  const handleMove = useCallback((e: React.MouseEvent) => {
+    const el = cardRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width;  // 0..1
+    const py = (e.clientY - r.top) / r.height; // 0..1
+
+    const rx = (py - 0.5) * -6; // X tilt
+    const ry = (px - 0.5) * 6;  // Y tilt
+
+    el.style.setProperty("--rx", `${rx}deg`);
+    el.style.setProperty("--ry", `${ry}deg`);
+    el.style.setProperty("--mx", `${(px * 100).toFixed(2)}%`);
+    el.style.setProperty("--my", `${(py * 100).toFixed(2)}%`);
+  }, []);
+
+  const handleLeave = useCallback(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    el.style.setProperty("--rx", `0deg`);
+    el.style.setProperty("--ry", `0deg`);
+  }, []);
+
+  return (
+    <button
+      ref={cardRef}
+      className="poster-card poster-tilt flex-shrink-0 text-center snap-start"
+      title={group.displayTitle}
+      style={{ ["--i" as any]: idx }}
+      onMouseMove={handleMove}
+      onMouseLeave={handleLeave}
+      onClick={onClick}
+    >
+      <div className="poster-wrap">
+        <img
+          src={group.poster}
+          alt={group.displayTitle}
+          className="poster w-28 sm:w-36 md:w-44 h-40 sm:h-56 md:h-64 object-cover rounded-xl"
+          loading="lazy"
+          onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
+        />
+        {/* sheen / glare sweep layer */}
+        <span aria-hidden className="poster-sheen" />
+      </div>
+      <p className="mt-2 truncate w-28 sm:w-36 md:w-44 text-sm">{group.displayTitle}</p>
+    </button>
   );
 }
 
@@ -211,22 +270,12 @@ function PosterRow({
           style={{ scrollPaddingLeft: 24, scrollPaddingRight: 24 }}
         >
           {items.map((g, idx) => (
-            <button
+            <PosterCard
               key={`${g.kind}-${g.key}`}
-              className="poster-card flex-shrink-0 text-center snap-start"
+              group={g}
+              idx={idx}
               onClick={() => onSelectGroup(g)}
-              title={g.displayTitle}
-              style={{ ["--i" as any]: idx }}
-            >
-              <img
-                src={g.poster}
-                alt={g.displayTitle}
-                className="poster w-28 sm:w-36 md:w-44 h-40 sm:h-56 md:h-64 object-cover rounded-xl"
-                loading="lazy"
-                onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
-              />
-              <p className="mt-2 truncate w-28 sm:w-36 md:w-44 text-sm">{g.displayTitle}</p>
-            </button>
+            />
           ))}
         </div>
       </div>
@@ -634,7 +683,6 @@ export default function PS3StyleUI() {
             seasons: [{ seasonName: "Movie", poster: groupPoster, files: list }],
           };
         } else {
-          // group files by season
           const sMap = list.reduce((mm: Record<string, MediaFile[]>, f) => {
             const label = f.season || "S01";
             (mm[label] ||= []).push(f);
@@ -647,7 +695,7 @@ export default function PS3StyleUI() {
                   sName
                 )}${first.year ? `&year=${first.year}` : ""}`
               );
-              const sData = sRes.ok ? await sRes.json() : { poster: null as string | null }; // <-- fixed sRes
+              const sData = sRes.ok ? await sRes.json() : { poster: null as string | null };
               return { seasonName: sName, poster: sData.poster || POSTER_FALLBACK, files: sMap[sName] };
             })
           );
@@ -667,7 +715,7 @@ export default function PS3StyleUI() {
       const cachedAt = localStorage.getItem("mediaCacheTime");
       const maxAge = 10 * 60 * 1000;
 
-      if (cached && cachedAt && Date.now() - parseInt(cachedAt) < maxAge) {
+    if (cached && cachedAt && Date.now() - parseInt(cachedAt) < maxAge) {
         try {
           const parsed = JSON.parse(cached) as GroupedMedia[];
           if (!cancelled) setMedia(parsed);
@@ -926,7 +974,6 @@ export default function PS3StyleUI() {
     if (!selected) return [];
     const label = selectedSeason ?? selected.seasons[0]?.seasonName;
     const list = selected.seasons.find((s) => s.seasonName === label)?.files ?? [];
-    // sort by parsed episode number if available
     return [...list].sort((a, b) => {
       const ea = parseEpisodeFromName(a.name).episode ?? 0;
       const eb = parseEpisodeFromName(b.name).episode ?? 0;
@@ -950,11 +997,11 @@ export default function PS3StyleUI() {
         ].join(" ")}
       >
         <div className="flex items-center gap-3">
-          {/* Make the logo larger by increasing h- classes; w-auto keeps aspect ratio */}
+          {/* Larger logo; also controlled by --nav-logo-h via .nav-logo */}
           <img
             src="/img/logo.png"
             alt="Media Vault Logo"
-            className="h-12 sm:h-14 lg:h-20 w-auto object-contain"
+            className="nav-logo w-auto object-contain h-12 sm:h-14 md:h-[var(--nav-logo-h)]"
           />
         </div>
 
@@ -978,7 +1025,7 @@ export default function PS3StyleUI() {
 
         <div className="flex-1" />
 
-        {/* Right actions */}
+        {/* Right actions (exact same height as segmented pill) */}
         <div className="hidden md:flex items-center gap-2 mr-1">
           <button
             className="chip flex items-center gap-2"
@@ -1006,8 +1053,8 @@ export default function PS3StyleUI() {
           </button>
         </div>
 
-        {/* Icon-only Search trigger */}
-        <button className="chip p-2" aria-label="Search" title="Search" onClick={() => setSearchOpen(true)}>
+        {/* Icon-only Search (same height as well) */}
+        <button className="chip" aria-label="Search" title="Search" onClick={() => setSearchOpen(true)}>
           <SearchIcon />
         </button>
       </nav>
@@ -1042,13 +1089,13 @@ export default function PS3StyleUI() {
                   placeholder="Search"
                   className="w-full bg-transparent outline-none text-white text-lg md:text-xl placeholder-white/70"
                 />
-                <button className="chip p-2" onClick={() => { setSearchOpen(false); setQ(""); }}>
+                <button className="chip" onClick={() => { setSearchOpen(false); setQ(""); }}>
                   <XIcon />
                 </button>
               </div>
             </div>
 
-            {/* Results (independent scroll) */}
+            {/* Results */}
             {qLive && results.length > 0 && (
               <div className="mt-3 glass rounded-2xl max-h-[60vh] overflow-y-auto overscroll-contain">
                 {results.map((r, i) => (
@@ -1235,15 +1282,15 @@ export default function PS3StyleUI() {
               <div className="min-w-0">
                 <h5 className="font-semibold drop-shadow truncate">
                   {(() => {
-                    const t = nowPlaying.cleanTitle || nowPlaying.name || "Untitled";
-                    const y = nowPlaying.year ? ` (${nowPlaying.year})` : "";
+                    const t = nowPlaying?.cleanTitle || nowPlaying?.name || "Untitled";
+                    const y = nowPlaying?.year ? ` (${nowPlaying.year})` : "";
                     return `${t}${y}`;
                   })()}
                 </h5>
               </div>
               <div className="flex gap-2">
                 <button className="chip" onClick={toggleFullscreen}>
-                  {isFullscreen ? "⤢ Exit Fullscreen" : "⛶ Fullscreen"}
+                  ⛶ Fullscreen
                 </button>
                 <button
                   className="chip"
@@ -1262,7 +1309,7 @@ export default function PS3StyleUI() {
             <div className="relative flex-1">
               <video
                 ref={videoRef}
-                key={nowPlaying.path}
+                key={nowPlaying?.path}
                 playsInline
                 controls={false}
                 className="absolute inset-0 w-full h-full object-contain bg-black"
@@ -1327,10 +1374,8 @@ export default function PS3StyleUI() {
                 } p-4 bg-gradient-to-t from-black/80 to-transparent`}
               >
                 <div className="flex items-center gap-3 text-sm">
-                  {/* current time */}
                   <span className="w-16 text-right tabular-nums">{fmtTime(sliderVal ?? current)}</span>
 
-                  {/* seek slider */}
                   <input
                     type="range"
                     min={0}
@@ -1358,12 +1403,10 @@ export default function PS3StyleUI() {
                     aria-label="Seek"
                   />
 
-                  {/* duration */}
                   <span className="w-16 tabular-nums">{fmtTime(duration)}</span>
 
-                  {/* volume controls (SVG icons) */}
                   <button
-                    className="chip px-3 py-1"
+                    className="chip px-3"
                     onClick={toggleMute}
                     title={muted ? "Unmute" : "Mute"}
                     aria-label={muted ? "Unmute" : "Mute"}
