@@ -2,6 +2,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import Hls from "hls.js";
 
+/* NEW: Framer Motion */
+import { AnimatePresence, LayoutGroup, motion } from "framer-motion";
+
 /* ----------------------------- Types ----------------------------- */
 
 type MediaFile = {
@@ -170,7 +173,7 @@ function VolumeHighIcon(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/* ---------------------- PosterCard (hover effects) ---------------------- */
+/* ---------------------- PosterCard (hover effects + FM) ---------------------- */
 
 function PosterCard({
   group,
@@ -183,7 +186,7 @@ function PosterCard({
 }) {
   const cardRef = useRef<HTMLButtonElement | null>(null);
 
-  // tiny tilt based on pointer position
+  // tiny tilt based on pointer position (already existed)
   const handleMove = useCallback((e: React.MouseEvent) => {
     const el = cardRef.current;
     if (!el) return;
@@ -208,7 +211,7 @@ function PosterCard({
   }, []);
 
   return (
-    <button
+    <motion.button
       ref={cardRef}
       className="poster-card poster-tilt flex-shrink-0 text-center snap-start"
       title={group.displayTitle}
@@ -216,20 +219,24 @@ function PosterCard({
       onMouseMove={handleMove}
       onMouseLeave={handleLeave}
       onClick={onClick}
+      whileTap={{ scale: 0.98 }}
+      transition={{ type: "spring", stiffness: 450, damping: 30, mass: 0.2 }}
     >
       <div className="poster-wrap">
-        <img
+        {/* Shared element for morphs: poster → modal/player */}
+        <motion.img
+          layoutId={`poster-${group.key}`}
           src={group.poster}
           alt={group.displayTitle}
           className="poster w-28 sm:w-36 md:w-44 h-40 sm:h-56 md:h-64 object-cover rounded-xl"
           loading="lazy"
           onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
         />
-        {/* sheen / glare sweep layer */}
+        {/* sheen / glare sweep layer (already existed) */}
         <span aria-hidden className="poster-sheen" />
       </div>
       <p className="mt-2 truncate w-28 sm:w-36 md:w-44 text-sm">{group.displayTitle}</p>
-    </button>
+    </motion.button>
   );
 }
 
@@ -261,7 +268,16 @@ function PosterRow({
 
   return (
     <section className="mb-8">
-      <h2 className="text-lg font-semibold px-6 mb-3">{title}</h2>
+      <motion.h2
+        className="text-lg font-semibold px-6 mb-3"
+        initial={{ opacity: 0, y: 12 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, margin: "-10% 0px -10% 0px" }}
+        transition={{ duration: 0.55, ease: [0.55, 1, 0.78, 1] }}
+      >
+        {title}
+      </motion.h2>
+
       <div className="edge-mask anim-up">
         <div
           ref={rowRef}
@@ -269,12 +285,19 @@ function PosterRow({
           style={{ scrollPaddingLeft: 24, scrollPaddingRight: 24 }}
         >
           {items.map((g, idx) => (
-            <PosterCard
+            <motion.div
               key={`${g.kind}-${g.key}`}
-              group={g}
-              idx={idx}
-              onClick={() => onSelectGroup(g)}
-            />
+              initial={{ opacity: 0, y: 10, scale: 0.98 }}
+              whileInView={{ opacity: 1, y: 0, scale: 1 }}
+              viewport={{ once: true, amount: 0.15 }}
+              transition={{
+                duration: 0.28,
+                ease: [0.55, 1, 0.78, 1],
+                delay: Math.min(idx, 6) * 0.055, // mild stagger for first few visible
+              }}
+            >
+              <PosterCard group={g} idx={idx} onClick={() => onSelectGroup(g)} />
+            </motion.div>
           ))}
         </div>
       </div>
@@ -368,6 +391,9 @@ export default function PS3StyleUI() {
   const [selectedSeason, setSelectedSeason] = useState<string | null>(null);
   const [selectedBackdrop, setSelectedBackdrop] = useState<string | null>(null);
 
+  // track where we clicked from (for FLIP poster → modal/player)
+  const [lastClickedKey, setLastClickedKey] = useState<string | null>(null);
+
   // player
   const [nowPlaying, setNowPlaying] = useState<MediaFile | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -391,7 +417,7 @@ export default function PS3StyleUI() {
   const [activeIdx, setActiveIdx] = useState(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  // navbar: blur only after scroll
+  // navbar: blur only after scroll (already existed)
   const [navSolid, setNavSolid] = useState(false);
   useEffect(() => {
     const onScroll = () => setNavSolid(window.scrollY > 6);
@@ -436,7 +462,7 @@ export default function PS3StyleUI() {
 
       const streamUrl = `/api/stream?file=${encodeURIComponent(fileArg.path)}`;
 
-      // 1) Try native progressive first (best path → GPU decode, no JS transmux)
+      // 1) Try native progressive first
       elArg.src = streamUrl;
       try {
         await elArg.play();
@@ -446,11 +472,10 @@ export default function PS3StyleUI() {
         // fall through
       }
 
-      // 2) Fallback to HLS (server will try copy first / GPU transcode if needed)
+      // 2) Fallback to HLS
       const probe = await probeHls(fileArg.path);
       if (!probe.ok || !probe.m3u8) {
         if (cancelled) return;
-        // final attempt: progressive again (in case autoplay got blocked)
         elArg.src = streamUrl;
         elArg.play().then(() => setIsPlaying(true)).catch(() => setIsPlaying(false));
         return;
@@ -821,6 +846,7 @@ export default function PS3StyleUI() {
       setSearchOpen(false);
       setQ("");
       setQLive("");
+      setLastClickedKey(item.key); // for morphs
       if (item.kind === "Movie") {
         const movie = item.group.seasons[0]?.files[0];
         if (movie) setNowPlaying(movie);
@@ -845,6 +871,7 @@ export default function PS3StyleUI() {
 
   /* ---------------------- poster click behaviour ---------------------- */
   const handleSelect = useCallback((g: GroupedMedia) => {
+    setLastClickedKey(g.key);
     if (g.kind === "Movie") {
       const movie = g.seasons[0]?.files[0];
       if (movie) setNowPlaying(movie);
@@ -996,446 +1023,543 @@ export default function PS3StyleUI() {
   const VolumeIcon = muted || volume === 0 ? VolumeMuteIcon : volume < 0.5 ? VolumeLowIcon : VolumeHighIcon;
 
   return (
-    <div className="fa-bg min-h-screen text-white">
-      {/* NAVBAR */}
-      <nav
-        className={[
-          "fixed top-0 left-0 right-0 z-30 transition-all duration-300",
-          "px-4 md:px-6 py-3 flex items-center gap-3",
-          navSolid
-            ? "bg-black/60 backdrop-blur-md border-b border-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
-            : "bg-transparent"
-        ].join(" ")}
-      >
-        <div className="flex items-center gap-3">{/* logo slot */}</div>
+    <LayoutGroup>
+      <div className="fa-bg min-h-screen text-white">
+        {/* NAVBAR */}
+        <nav
+          className={[
+            "fixed top-0 left-0 right-0 z-30 transition-all duration-300",
+            "px-4 md:px-6 py-3 flex items-center gap-3",
+            navSolid
+              ? "bg-black/60 backdrop-blur-md border-b border-white/10 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.6)]"
+              : "bg-transparent"
+          ].join(" ")}
+        >
+          <div className="flex items-center gap-3">{/* logo slot */}</div>
 
-        {/* Segmented control */}
-        <div>
-          <div className="segment">
+          {/* Segmented control (existing) */}
+          <div>
+            <div className="segment">
+              <button
+                className={`segment-btn ${activeTab === "TV" ? "is-active" : ""}`}
+                onClick={() => setActiveTab("TV")}
+              >
+                TV Shows
+              </button>
+              <button
+                className={`segment-btn ${activeTab === "Movies" ? "is-active" : ""}`}
+                onClick={() => setActiveTab("Movies")}
+              >
+                Movies
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1" />
+
+          {/* Right actions */}
+          <div className="hidden md:flex items-center gap-2 mr-1">
             <button
-              className={`segment-btn ${activeTab === "TV" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("TV")}
+              className="chip flex items-center gap-2"
+              title="Shuffle a Movie"
+              onClick={() => {
+                const m = media.filter((g) => g.kind === "Movie");
+                if (!m.length) return;
+                const rand = m[Math.floor(Math.random() * m.length)];
+                setLastClickedKey(rand.key);
+                const file = rand.seasons[0]?.files[0];
+                if (file) setNowPlaying(file);
+              }}
             >
-              TV Shows
+              <ShuffleIcon />
+              <span className="hidden sm:inline">Random</span>
             </button>
-            <button
-              className={`segment-btn ${activeTab === "Movies" ? "is-active" : ""}`}
-              onClick={() => setActiveTab("Movies")}
-            >
-              Movies
+
+            <button className="chip flex items-center gap-2" title="Theme (placeholder)">
+              <MoonIcon />
+              <span className="hidden sm:inline">Theme</span>
+            </button>
+
+            <button className="chip flex items-center gap-2" title="Settings (placeholder)">
+              <CogIcon />
+              <span className="hidden sm:inline">Settings</span>
             </button>
           </div>
-        </div>
 
-        <div className="flex-1" />
-
-        {/* Right actions */}
-        <div className="hidden md:flex items-center gap-2 mr-1">
-          <button
-            className="chip flex items-center gap-2"
-            title="Shuffle a Movie"
-            onClick={() => {
-              const m = media.filter((g) => g.kind === "Movie");
-              if (!m.length) return;
-              const rand = m[Math.floor(Math.random() * m.length)];
-              const file = rand.seasons[0]?.files[0];
-              if (file) setNowPlaying(file);
-            }}
-          >
-            <ShuffleIcon />
-            <span className="hidden sm:inline">Random</span>
+          {/* Icon-only Search */}
+          <button className="chip" aria-label="Search" title="Search" onClick={() => setSearchOpen(true)}>
+            <SearchIcon />
           </button>
+        </nav>
 
-          <button className="chip flex items-center gap-2" title="Theme (placeholder)">
-            <MoonIcon />
-            <span className="hidden sm:inline">Theme</span>
-          </button>
+        <main className="pt-24 pb-10">
+          {rows.map((row) => (
+            <PosterRow key={row.title} title={row.title} items={row.items} onSelectGroup={handleSelect} />
+          ))}
+        </main>
 
-          <button className="chip flex items-center gap-2" title="Settings (placeholder)">
-            <CogIcon />
-            <span className="hidden sm:inline">Settings</span>
-          </button>
-        </div>
-
-        {/* Icon-only Search */}
-        <button className="chip" aria-label="Search" title="Search" onClick={() => setSearchOpen(true)}>
-          <SearchIcon />
-        </button>
-      </nav>
-
-      <main className="pt-24 pb-10">
-        {rows.map((row) => (
-          <PosterRow key={row.title} title={row.title} items={row.items} onSelectGroup={handleSelect} />
-        ))}
-      </main>
-
-      {/* ---------------------- SEARCH OVERLAY ---------------------- */}
-      {searchOpen && (
-        <div
-          className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm overscroll-none"
-          onClick={() => setSearchOpen(false)}
-        >
-          <div className="mx-auto mt-16 max-w-5xl px-4" onClick={(e) => e.stopPropagation()}>
-            {/* Input bar */}
-            <div className="glass rounded-2xl p-3 md:p-4">
-              <div className="flex items-center gap-3">
-                <SearchIcon />
-                <input
-                  ref={searchInputRef}
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && results[activeIdx]) {
-                      openFromResult(results[activeIdx]);
-                    }
-                    if (e.key === "Escape") setSearchOpen(false);
-                  }}
-                  placeholder="Search"
-                  className="w-full bg-transparent outline-none text-white text-lg md:text-xl placeholder-white/70"
-                />
-                <button className="chip" onClick={() => { setSearchOpen(false); setQ(""); }}>
-                  <XIcon />
-                </button>
-              </div>
-            </div>
-
-            {/* Results */}
-            {qLive && results.length > 0 && (
-              <div className="mt-3 glass rounded-2xl max-h-[60vh] overflow-y-auto overscroll-contain">
-                {results.map((r, i) => (
-                  <button
-                    key={r.key}
-                    className={`w-full flex gap-4 items-center px-4 py-3 text-left hover:bg-white/5 ${
-                      i === activeIdx ? "bg-white/10" : ""
-                    }`}
-                    onMouseEnter={() => setActiveIdx(i)}
-                    onClick={() => openFromResult(r)}
-                  >
-                    <img
-                      src={r.poster || POSTER_FALLBACK}
-                      onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
-                      className="w-[46px] h-[68px] object-cover rounded"
-                      alt=""
+        {/* ---------------------- SEARCH OVERLAY (FM) ---------------------- */}
+        <AnimatePresence>
+          {searchOpen && (
+            <motion.div
+              className="fixed inset-0 z-[120] bg-black/70 backdrop-blur-sm overscroll-none"
+              onClick={() => setSearchOpen(false)}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.2 }}
+            >
+              <motion.div
+                className="mx-auto mt-16 max-w-5xl px-4"
+                onClick={(e) => e.stopPropagation()}
+                initial={{ y: 10, opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: 10, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {/* Input bar */}
+                <div className="glass rounded-2xl p-3 md:p-4">
+                  <div className="flex items-center gap-3">
+                    <SearchIcon />
+                    <input
+                      ref={searchInputRef}
+                      value={q}
+                      onChange={(e) => setQ(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && results[activeIdx]) {
+                          openFromResult(results[activeIdx]);
+                        }
+                        if (e.key === "Escape") setSearchOpen(false);
+                      }}
+                      placeholder="Search"
+                      className="w-full bg-transparent outline-none text-white text-lg md:text-xl placeholder-white/70"
                     />
-                    <div className="min-w-0">
-                      <div className="truncate text-base md:text-lg">{r.title}</div>
-                      <div className="text-xs opacity-70">
-                        {r.kind} {r.year ? `• ${r.year}` : ""}
-                      </div>
-                    </div>
-                  </button>
-                ))}
-                <div className="px-4 py-2 text-xs opacity-60 border-t border-white/10 sticky bottom-0 bg-black/20 backdrop-blur">
-                  {results.length} result{results.length === 1 ? "" : "s"}
+                    <button className="chip" onClick={() => { setSearchOpen(false); setQ(""); }}>
+                      <XIcon />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
 
-            {qLive && results.length === 0 && (
-              <div className="mt-3 glass rounded-2xl p-4 text-sm opacity-80">No results for “{qLive}”.</div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* --------------------------- DETAILS MODAL (TV) --------------------------- */}
-      {selected && (
-        <section
-          className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => {
-            setSelected(null);
-            setSelectedSeason(null);
-            setSelectedBackdrop(null);
-          }}
-        >
-          <div
-            className="glass w-full max-w-5xl max-h-[85vh] overflow-auto rounded-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* HERO */}
-            <div className="relative h-[38vh] min-h-[240px] w-full overflow-hidden rounded-t-2xl">
-              <img
-                src={selectedBackdrop || selected.poster || POSTER_FALLBACK}
-                alt={selected.displayTitle}
-                className="absolute inset-0 w-full h-full object-cover"
-                onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
-                loading="eager"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
-              <div className="absolute left-4 right-4 bottom-4 flex flex-wrap items-end gap-3 justify-between">
-                {/* Left: Title + Year + Season dropdown */}
-                <div className="flex flex-wrap items-center gap-3">
-                  <h3 className="text-2xl md:text-3xl font-semibold drop-shadow">
-                    {selected.displayTitle}
-                    {selectedYear ? <span className="opacity-80 text-base md:text-lg"> ({selectedYear})</span> : null}
-                  </h3>
-
-                  {/* Seasons dropdown (only what exists locally) */}
-                  {selected.kind === "TV Show" && selected.seasons.length > 0 && (
-                    <label className="sr-only" htmlFor="seasonSelect">Season</label>
-                  )}
-
-                  {selected.kind === "TV Show" && selected.seasons.length > 0 && (
-                    <select
-                      id="seasonSelect"
-                      value={selectedSeason ?? selected.seasons[0]?.seasonName}
-                      onChange={(e) => setSelectedSeason(e.target.value)}
-                      className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm backdrop-blur hover:bg-white/15 focus:outline-none"
+                {/* Results */}
+                <AnimatePresence initial={false}>
+                  {qLive && results.length > 0 && (
+                    <motion.div
+                      className="mt-3 glass rounded-2xl max-h-[60vh] overflow-y-auto overscroll-contain"
+                      initial={{ opacity: 0, scale: 0.995 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.995 }}
+                      transition={{ duration: 0.55 }}
                     >
-                      {selected.seasons.map((s) => (
-                        <option key={s.seasonName} value={s.seasonName}>
-                          {s.seasonName} ({s.files.length})
-                        </option>
+                      {results.map((r, i) => (
+                        <motion.button
+                          key={r.key}
+                          className={`w-full flex gap-4 items-center px-4 py-3 text-left hover:bg-white/5 ${
+                            i === activeIdx ? "bg-white/10" : ""
+                          }`}
+                          onMouseEnter={() => setActiveIdx(i)}
+                          onClick={() => openFromResult(r)}
+                          initial={{ opacity: 0, y: 6 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 6 }}
+                          transition={{ duration: 0.18, delay: Math.min(i, 6) * 0.035 }}
+                        >
+                          <img
+                            src={r.poster || POSTER_FALLBACK}
+                            onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
+                            className="w-[46px] h-[68px] object-cover rounded"
+                            alt=""
+                          />
+                          <div className="min-w-0">
+                            <div className="truncate text-base md:text-lg">{r.title}</div>
+                            <div className="text-xs opacity-70">
+                              {r.kind} {r.year ? `• ${r.year}` : ""}
+                            </div>
+                          </div>
+                        </motion.button>
                       ))}
-                    </select>
+                      <div className="px-4 py-2 text-xs opacity-60 border-t border-white/10 sticky bottom-0 bg-black/20 backdrop-blur">
+                        {results.length} result{results.length === 1 ? "" : "s"}
+                      </div>
+                    </motion.div>
                   )}
-                </div>
 
-                {/* Right: Close */}
-                <button
-                  className="chip"
-                  onClick={() => {
-                    setSelected(null);
-                    setSelectedSeason(null);
-                    setSelectedBackdrop(null);
-                  }}
-                >
-                  ✕ Close
-                </button>
-              </div>
-            </div>
+                  {qLive && results.length === 0 && (
+                    <motion.div
+                      className="mt-3 glass rounded-2xl p-4 text-sm opacity-80"
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                    >
+                      No results for “{qLive}”.
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-            {/* CONTENT: Episodes */}
-            <div className="p-4 md:p-6">
-              <h4 className="mb-2 font-semibold">
-                Episodes — {selectedSeason ?? selected.seasons[0]?.seasonName}
-              </h4>
+        {/* --------------------------- DETAILS MODAL (TV) --------------------------- */}
+        <AnimatePresence>
+          {selected && (
+            <motion.section
+              className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4"
+              onClick={() => {
+                setSelected(null);
+                setSelectedSeason(null);
+                setSelectedBackdrop(null);
+              }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              <motion.div
+                className="glass w-full max-w-5xl max-h-[85vh] overflow-auto rounded-2xl"
+                onClick={(e) => e.stopPropagation()}
+                initial={{ y: 12, opacity: 0, scale: 0.98 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: 12, opacity: 0, scale: 0.98 }}
+                transition={{ duration: 0.55, ease: [0.55, 1, 0.78, 1] }}
+              >
+                {/* HERO with shared element morph from poster */}
+                <div className="relative h-[38vh] min-h-[240px] w-full overflow-hidden rounded-t-2xl">
+                  <motion.img
+                    layoutId={lastClickedKey ? `poster-${lastClickedKey}` : undefined}
+                    src={selectedBackdrop || selected.poster || POSTER_FALLBACK}
+                    alt={selected.displayTitle}
+                    className="absolute inset-0 w-full h-full object-cover"
+                    onError={(e) => ((e.currentTarget as HTMLImageElement).src = POSTER_FALLBACK)}
+                    loading="eager"
+                    transition={{ type: "spring", stiffness: 350, damping: 35, mass: 0.4 }}
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+                  <div className="absolute left-4 right-4 bottom-4 flex flex-wrap items-end gap-3 justify-between">
+                    {/* Left: Title + Year + Season dropdown */}
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h3 className="text-2xl md:text-3xl font-semibold drop-shadow">
+                        {selected.displayTitle}
+                        {selectedYear ? <span className="opacity-80 text-base md:text-lg"> ({selectedYear})</span> : null}
+                      </h3>
 
-              {!epReady && <div className="opacity-70 text-sm mb-2">Loading episode details…</div>}
+                      {/* Seasons dropdown (only what exists locally) */}
+                      {selected.kind === "TV Show" && selected.seasons.length > 0 && (
+                        <label className="sr-only" htmlFor="seasonSelect">Season</label>
+                      )}
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-                {currentSeasonFiles.map((file: MediaFile) => {
-                  const parsed = parseEpisodeFromName(file.name);
-                  const epNo = parsed.episode;
-                  const tmdb = epNo ? epMeta[epNo] : undefined;
+                      {selected.kind === "TV Show" && selected.seasons.length > 0 && (
+                        <select
+                          id="seasonSelect"
+                          value={selectedSeason ?? selected.seasons[0]?.seasonName}
+                          onChange={(e) => setSelectedSeason(e.target.value)}
+                          className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-sm backdrop-blur hover:bg-white/15 focus:outline-none"
+                        >
+                          {selected.seasons.map((s) => (
+                            <option key={s.seasonName} value={s.seasonName}>
+                              {s.seasonName} ({s.files.length})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
 
-                  const title =
-                    tmdb?.name
-                      ? `Episode ${pad2(epNo!)} — ${tmdb.name}`
-                      : epNo
-                        ? `Episode ${pad2(epNo)}`
-                        : file.name;
-
-                  const stillSrc =
-                    tmdb?.still_path && imageBase ? `${imageBase}/w780${tmdb.still_path}` : undefined;
-
-                  return (
+                    {/* Right: Close */}
                     <button
-                      key={file.path}
-                      className="group rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 transition"
+                      className="chip"
                       onClick={() => {
-                        setNowPlaying(file);
                         setSelected(null);
                         setSelectedSeason(null);
                         setSelectedBackdrop(null);
                       }}
-                      title={title}
                     >
-                      <div className="aspect-video w-full bg-black/30 overflow-hidden">
-                        {stillSrc ? (
-                          <img
-                            src={stillSrc}
-                            alt={title}
-                            className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"
-                            onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <span className="opacity-80 text-sm px-2 text-center truncate">{title}</span>
-                          </div>
-                        )}
-                      </div>
-                      <div className="p-2 text-left">
-                        <span className="block truncate text-xs opacity-70">
-                          {selectedSeason ?? ""}
-                        </span>
-                        <span className="block truncate text-sm">{title}</span>
-                      </div>
+                      ✕ Close
                     </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ----------------------------- VIDEO PLAYER ----------------------------- */}
-      {nowPlaying && (
-        <section className="fixed inset-0 z-[100] bg-black">
-          <div
-            ref={playerShellRef}
-            className={`absolute inset-0 flex flex-col ${controlsVisible ? "" : "cursor-none"}`}
-          >
-            {/* Top bar (auto-hide) */}
-            <div
-              className={`transition-opacity duration-300 ${
-                controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
-              } flex items-center justify-between p-3 md:p-4 bg-gradient-to-b from-black/70 to-transparent`}
-            >
-              <div className="min-w-0">
-                <h5 className="font-semibold drop-shadow truncate">
-                  {(() => {
-                    const t = nowPlaying?.cleanTitle || nowPlaying?.name || "Untitled";
-                    const y = nowPlaying?.year ? ` (${nowPlaying.year})` : "";
-                    return `${t}${y}`;
-                  })()}
-                </h5>
-              </div>
-              <div className="flex gap-2">
-                <button className="chip" onClick={toggleFullscreen}>
-                  ⛶ Fullscreen
-                </button>
-                <button
-                  className="chip"
-                  onClick={() => {
-                    setNowPlaying(null);
-                    hlsRef.current?.destroy();
-                    hlsRef.current = null;
-                  }}
-                >
-                  ✕ Close
-                </button>
-              </div>
-            </div>
-
-            {/* video area */}
-            <div className="relative flex-1">
-              <video
-                ref={videoRef}
-                key={nowPlaying?.path}
-                playsInline
-                controls={false}
-                className="absolute inset-0 w-full h-full object-contain bg-black"
-                onClick={() => {
-                  const v = videoRef.current;
-                  if (!v) return;
-                  v.paused ? v.play() : v.pause();
-                  showControlsTemporarily();
-                }}
-              />
-
-              {/* center transport controls */}
-              <div
-                className={`absolute inset-0 transition-opacity duration-300 ${
-                  controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
-                } pointer-events-none flex items-center justify-center gap-6`}
-              >
-                <button
-                  className="pointer-events-auto w-16 h-16 md:w-20 md:h-20 rounded-full bg-black/40 border border-white/30 flex items-center justify-center text-2xl backdrop-blur"
-                  onClick={() => {
-                    const v = videoRef.current;
-                    if (!v) return;
-                    v.currentTime = Math.max(0, v.currentTime - 10);
-                    showControlsTemporarily();
-                  }}
-                  title="Back 10s"
-                >
-                  ⟲
-                </button>
-
-                <button
-                  className="pointer-events-auto w-16 h-16 md:w-20 md:h-20 rounded-full bg-black/50 border border-white/40 flex items-center justify-center text-3xl font-semibold backdrop-blur"
-                  onClick={() => {
-                    const v = videoRef.current;
-                    if (!v) return;
-                    v.paused ? v.play() : v.pause();
-                    showControlsTemporarily();
-                  }}
-                  title="Play/Pause"
-                >
-                  {isPlaying ? "⏸" : "▶"}
-                </button>
-
-                <button
-                  className="pointer-events-auto w-16 h-16 md:w-20 md:h-20 rounded-full bg-black/40 border border-white/30 flex items-center justify-center text-2xl backdrop-blur"
-                  onClick={() => {
-                    const v = videoRef.current;
-                    if (!v) return;
-                    v.currentTime = Math.min(v.duration || v.currentTime + 10, v.currentTime + 10);
-                    showControlsTemporarily();
-                  }}
-                  title="Forward 10s"
-                >
-                  ⟳
-                </button>
-              </div>
-
-              {/* bottom control bar */}
-              <div
-                className={`absolute left-0 right-0 bottom-0 transition-opacity duration-300 ${
-                  controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"
-                } p-4 bg-gradient-to-t from-black/80 to-transparent`}
-              >
-                <div className="flex items-center gap-3 text-sm">
-                  <span className="w-16 text-right tabular-nums">{fmtTime(sliderVal ?? current)}</span>
-
-                  <input
-                    type="range"
-                    min={0}
-                    max={duration || 0}
-                    step={0.1}
-                    value={sliderVal ?? current}
-                    onChange={(e) => setSliderVal(Number(e.target.value))}
-                    onMouseDown={() => setSliderVal(current)}
-                    onMouseUp={(e) => {
-                      const v = videoRef.current;
-                      const val = Number((e.target as HTMLInputElement).value);
-                      if (v) v.currentTime = val;
-                      setSliderVal(null);
-                      showControlsTemporarily();
-                    }}
-                    onTouchStart={() => setSliderVal(current)}
-                    onTouchEnd={(e) => {
-                      const v = videoRef.current;
-                      const val = Number((e.target as HTMLInputElement).value);
-                      if (v) v.currentTime = val;
-                      setSliderVal(null);
-                      showControlsTemporarily();
-                    }}
-                    className="flex-1 accent-white"
-                    aria-label="Seek"
-                  />
-
-                  <span className="w-16 tabular-nums">{fmtTime(duration)}</span>
-
-                  <button
-                    className="chip px-3"
-                    onClick={toggleMute}
-                    title={muted ? "Unmute" : "Mute"}
-                    aria-label={muted ? "Unmute" : "Mute"}
-                  >
-                    <VolumeIcon />
-                  </button>
-
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={muted ? 0 : volume}
-                    onChange={(e) => setVolumeSafe(Number(e.target.value))}
-                    onMouseDown={showControlsTemporarily}
-                    onTouchStart={showControlsTemporarily}
-                    className="w-24 md:w-32 accent-white"
-                    aria-label="Volume"
-                  />
+                  </div>
                 </div>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
-    </div>
+
+                {/* CONTENT: Episodes */}
+                <div className="p-4 md:p-6">
+                  <h4 className="mb-2 font-semibold">
+                    Episodes — {selectedSeason ?? selected.seasons[0]?.seasonName}
+                  </h4>
+
+                  {!epReady && <div className="opacity-70 text-sm mb-2">Loading episode details…</div>}
+
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                    {currentSeasonFiles.map((file: MediaFile, i: number) => {
+                      const parsed = parseEpisodeFromName(file.name);
+                      const epNo = parsed.episode;
+                      const tmdb = epNo ? epMeta[epNo] : undefined;
+
+                      const title =
+                        tmdb?.name
+                          ? `Episode ${pad2(epNo!)} — ${tmdb.name}`
+                          : epNo
+                            ? `Episode ${pad2(epNo)}`
+                            : file.name;
+
+                      const stillSrc =
+                        tmdb?.still_path && imageBase ? `${imageBase}/w780${tmdb.still_path}` : undefined;
+
+                      return (
+                        <motion.button
+                          key={file.path}
+                          className="group rounded-lg overflow-hidden bg-white/5 border border-white/10 hover:border-white/30 transition"
+                          onClick={() => {
+                            setNowPlaying(file);
+                            setLastClickedKey(selected.key);
+                            setSelected(null);
+                            setSelectedSeason(null);
+                            setSelectedBackdrop(null);
+                          }}
+                          title={title}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.2, delay: Math.min(i, 8) * 0.04 }}
+                          whileTap={{ scale: 0.985 }}
+                        >
+                          <div className="aspect-video w-full bg-black/30 overflow-hidden">
+                            {stillSrc ? (
+                              <img
+                                src={stillSrc}
+                                alt={title}
+                                className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform"
+                                onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")}
+                              />
+                            ) : (
+                              <div className="w-full h-full flex items-center justify-center">
+                                <span className="opacity-80 text-sm px-2 text-center truncate">{title}</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="p-2 text-left">
+                            <span className="block truncate text-xs opacity-70">
+                              {selectedSeason ?? ""}
+                            </span>
+                            <span className="block truncate text-sm">{title}</span>
+                          </div>
+                        </motion.button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </motion.div>
+            </motion.section>
+          )}
+        </AnimatePresence>
+
+        {/* ----------------------------- VIDEO PLAYER ----------------------------- */}
+        <AnimatePresence>
+          {nowPlaying && (
+            <motion.section
+              className="fixed inset-0 z-[100] bg-black"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              <motion.div
+                ref={playerShellRef}
+                className={`absolute inset-0 flex flex-col ${controlsVisible ? "" : "cursor-none"}`}
+                initial={{ scale: 0.995 }}
+                animate={{ scale: 1 }}
+                exit={{ scale: 0.995 }}
+                transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+              >
+                {/* Optional: shared element morph poster → video background */}
+                <AnimatePresence>
+                  {lastClickedKey && (
+                    <motion.div
+                      className="absolute inset-0"
+                      initial={{ opacity: 1 }}
+                      animate={{ opacity: 0 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.28 }}
+                    >
+                      <motion.img
+                        layoutId={`poster-${lastClickedKey}`}
+                        src={
+                          media.find((g) => g.key === lastClickedKey)?.poster ||
+                          POSTER_FALLBACK
+                        }
+                        alt=""
+                        className="absolute inset-0 w-full h-full object-contain opacity-30"
+                        transition={{ type: "spring", stiffness: 360, damping: 36, mass: 0.4 }}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Top bar (auto-hide) */}
+                <motion.div
+                  className={`${
+                    controlsVisible ? "hud-top hud-top--visible" : "hud-top hud-top--hidden pointer-events-none"
+                  } flex items-center justify-between p-3 md:p-4 bg-gradient-to-b from-black/70 to-transparent`}
+                  initial={false}
+                  animate={{ opacity: controlsVisible ? 1 : 0 }}
+                  transition={{ duration: 0.18 }}
+                >
+                  <div className="min-w-0">
+                    <h5 className="font-semibold drop-shadow truncate">
+                      {(() => {
+                        const t = nowPlaying?.cleanTitle || nowPlaying?.name || "Untitled";
+                        const y = nowPlaying?.year ? ` (${nowPlaying.year})` : "";
+                        return `${t}${y}`;
+                      })()}
+                    </h5>
+                  </div>
+                  <div className="flex gap-2">
+                    <button className="chip" onClick={toggleFullscreen}>
+                      ⛶ Fullscreen
+                    </button>
+                    <button
+                      className="chip"
+                      onClick={() => {
+                        setNowPlaying(null);
+                        hlsRef.current?.destroy();
+                        hlsRef.current = null;
+                      }}
+                    >
+                      ✕ Close
+                    </button>
+                  </div>
+                </motion.div>
+
+                {/* video area */}
+                <div className="relative flex-1">
+                  <video
+                    ref={videoRef}
+                    key={nowPlaying?.path}
+                    playsInline
+                    controls={false}
+                    className="absolute inset-0 w-full h-full object-contain bg-black"
+                    onClick={() => {
+                      const v = videoRef.current;
+                      if (!v) return;
+                      v.paused ? v.play() : v.pause();
+                      showControlsTemporarily();
+                    }}
+                  />
+
+                  {/* center transport controls */}
+                  <motion.div
+                    className={`absolute inset-0 ${
+                      controlsVisible ? "hud-center hud-center--visible" : "hud-center hud-center--hidden pointer-events-none"
+                    } flex items-center justify-center gap-6`}
+                    initial={false}
+                    animate={{ opacity: controlsVisible ? 1 : 0 }}
+                    transition={{ duration: 0.18 }}
+                  >
+                    <button
+                      className="pointer-events-auto w-16 h-16 md:w-20 md:h-20 rounded-full bg-black/40 border border-white/30 flex items-center justify-center text-2xl backdrop-blur"
+                      onClick={() => {
+                        const v = videoRef.current;
+                        if (!v) return;
+                        v.currentTime = Math.max(0, v.currentTime - 10);
+                        showControlsTemporarily();
+                      }}
+                      title="Back 10s"
+                    >
+                      ⟲
+                    </button>
+
+                    <button
+                      className="pointer-events-auto w-16 h-16 md:w-20 md:h-20 rounded-full bg-black/50 border border-white/40 flex items-center justify-center text-3xl font-semibold backdrop-blur"
+                      onClick={() => {
+                        const v = videoRef.current;
+                        if (!v) return;
+                        v.paused ? v.play() : v.pause();
+                        showControlsTemporarily();
+                      }}
+                      title="Play/Pause"
+                    >
+                      {isPlaying ? "⏸" : "▶"}
+                    </button>
+
+                    <button
+                      className="pointer-events-auto w-16 h-16 md:w-20 md:h-20 rounded-full bg-black/40 border border-white/30 flex items-center justify-center text-2xl backdrop-blur"
+                      onClick={() => {
+                        const v = videoRef.current;
+                        if (!v) return;
+                        v.currentTime = Math.min(v.duration || v.currentTime + 10, v.currentTime + 10);
+                        showControlsTemporarily();
+                      }}
+                      title="Forward 10s"
+                    >
+                      ⟳
+                    </button>
+                  </motion.div>
+
+                  {/* bottom control bar */}
+                  <motion.div
+                    className={`absolute left-0 right-0 bottom-0 ${
+                      controlsVisible ? "hud-bottom hud-bottom--visible" : "hud-bottom hud-bottom--hidden pointer-events-none"
+                    } p-4 bg-gradient-to-t from-black/80 to-transparent`}
+                    initial={false}
+                    animate={{ opacity: controlsVisible ? 1 : 0 }}
+                    transition={{ duration: 0.18 }}
+                  >
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="w-16 text-right tabular-nums">{fmtTime(sliderVal ?? current)}</span>
+
+                      <input
+                        type="range"
+                        min={0}
+                        max={duration || 0}
+                        step={0.1}
+                        value={sliderVal ?? current}
+                        onChange={(e) => setSliderVal(Number(e.target.value))}
+                        onMouseDown={() => setSliderVal(current)}
+                        onMouseUp={(e) => {
+                          const v = videoRef.current;
+                          const val = Number((e.target as HTMLInputElement).value);
+                          if (v) v.currentTime = val;
+                          setSliderVal(null);
+                          showControlsTemporarily();
+                        }}
+                        onTouchStart={() => setSliderVal(current)}
+                        onTouchEnd={(e) => {
+                          const v = videoRef.current;
+                          const val = Number((e.target as HTMLInputElement).value);
+                          if (v) v.currentTime = val;
+                          setSliderVal(null);
+                          showControlsTemporarily();
+                        }}
+                        className="flex-1 accent-white"
+                        aria-label="Seek"
+                      />
+
+                      <span className="w-16 tabular-nums">{fmtTime(duration)}</span>
+
+                      <button
+                        className="chip px-3"
+                        onClick={toggleMute}
+                        title={muted ? "Unmute" : "Mute"}
+                        aria-label={muted ? "Unmute" : "Mute"}
+                      >
+                        <VolumeIcon />
+                      </button>
+
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={muted ? 0 : volume}
+                        onChange={(e) => setVolumeSafe(Number(e.target.value))}
+                        onMouseDown={showControlsTemporarily}
+                        onTouchStart={showControlsTemporarily}
+                        className="w-24 md:w-32 accent-white"
+                        aria-label="Volume"
+                      />
+                    </div>
+                  </motion.div>
+                </div>
+              </motion.div>
+            </motion.section>
+          )}
+        </AnimatePresence>
+      </div>
+    </LayoutGroup>
   );
 }

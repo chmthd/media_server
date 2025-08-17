@@ -252,6 +252,7 @@ body {
 .hud-center--hidden { transform: scale(0.98);       }
 .hud-center--visible{ transform: scale(1);          }
 
+/* Accessibility: global reduce-motion override */
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
